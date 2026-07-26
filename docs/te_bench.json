@@ -1,0 +1,60 @@
+{
+ "gpu": "bf16",
+ "torch": "2.10.0+rocm7.14.0a20260611",
+ "centros": 6,
+ "medido_em": "2026-07-26 15:02",
+ "resultados": [
+  {
+   "dispositivo": "cuda",
+   "precisao": "bf16",
+   "modo": "sequencial",
+   "segundos": 0.919
+  },
+  {
+   "dispositivo": "cuda",
+   "precisao": "fp16",
+   "modo": "sequencial",
+   "segundos": 0.931
+  },
+  {
+   "dispositivo": "cuda",
+   "precisao": "fp32",
+   "modo": "sequencial",
+   "segundos": 1.957
+  },
+  {
+   "dispositivo": "cpu",
+   "precisao": "fp16",
+   "modo": "residente",
+   "segundos": 5.33
+  },
+  {
+   "dispositivo": "cpu",
+   "precisao": "bf16",
+   "modo": "residente",
+   "segundos": 8.1
+  },
+  {
+   "dispositivo": "cpu",
+   "precisao": "fp32",
+   "modo": "residente",
+   "segundos": 212.186
+  }
+ ],
+ "melhor": {
+  "dispositivo": "cuda",
+  "precisao": "bf16",
+  "modo": "sequencial",
+  "segundos": 0.919
+ },
+ "divergencia": {
+  "fp16": {
+   "dist_cosseno": -1.049041748046875e-05,
+   "err_rel_medio": 0.004134740214794874
+  },
+  "bf16": {
+   "dist_cosseno": 6.079673767089844e-05,
+   "err_rel_medio": 0.04229171574115753
+  }
+ }
+}

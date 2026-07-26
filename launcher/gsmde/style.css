@@ -1,0 +1,277 @@
+/* GSMDE Studio — tema de producao. Sobrio, azul do mascote, estilo SD.Next. */
+:root{
+  --bg:#0b0f16; --panel:#131a24; --panel2:#0f151d; --bd:#243040;
+  --fg:#e6edf3; --mut:#8b98a9; --acc:#3b82f6; --acc2:#2563eb;
+  --ok:#3fb950; --warn:#d29922; --err:#f85149; --roxo:#7c3aed;
+  --radius:10px; --gap:12px;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; height:100%; background:var(--bg); color:var(--fg);
+  font:14px/1.45 "Segoe UI",system-ui,sans-serif; overflow:hidden; }
+button,input,select,textarea{ font:inherit; color:var(--fg); }
+
+/* ---------- banner ---------- */
+#banner{ height:92px; background:#0a0e14 center/cover no-repeat;
+  border-bottom:1px solid var(--bd); position:relative; display:flex; align-items:flex-end; }
+#banner .veil{ position:absolute; inset:0;
+  background:linear-gradient(90deg,rgba(11,15,22,.55),rgba(11,15,22,.05) 45%,rgba(11,15,22,.55)); }
+#banner .brand{ position:relative; padding:0 16px 8px; display:flex; align-items:center; gap:10px; }
+#banner img.logo{ width:40px; height:40px; border-radius:9px; box-shadow:0 2px 8px rgba(0,0,0,.5); }
+#banner .name{ font-size:20px; font-weight:700; letter-spacing:.3px;
+  text-shadow:0 2px 6px rgba(0,0,0,.8); }
+#banner .ver{ font-size:12px; color:#cdd7e3; background:rgba(0,0,0,.45);
+  padding:2px 8px; border-radius:20px; border:1px solid rgba(255,255,255,.12); }
+
+/* ---------- abas ---------- */
+#abas{ display:flex; gap:2px; background:var(--panel2); border-bottom:1px solid var(--bd);
+  padding:0 8px; }
+#abas .aba{ background:transparent; border:none; border-bottom:2px solid transparent;
+  border-radius:0; padding:8px 14px; color:var(--mut); font-size:13px; }
+#abas .aba:hover{ color:var(--fg); }
+#abas .aba.ativa{ color:var(--fg); border-bottom-color:var(--acc); font-weight:600; }
+
+/* ---------- layout principal ---------- */
+#main{ display:flex; height:calc(100% - 92px - 35px); }
+#colConfig{ overflow-y:auto; flex:1; }
+#colConfig .group{ margin-bottom:10px; }
+/* coluna em flex: o prompt fica com TODA a sobra. Recolher os menus devolve
+   espaco -> a caixa de texto cresce sozinha (era o oposto: rolagem unica e a
+   caixa presa em 120px). */
+#left{ width:390px; min-width:390px; height:100%; display:flex; flex-direction:column;
+  border-right:1px solid var(--bd); background:var(--panel2); padding:12px; overflow:hidden; }
+#promptZone{ display:flex; flex-direction:column; flex:1 1 auto; min-height:170px; }
+#promptZone .field.grow{ flex:1 1 auto; display:flex; flex-direction:column; min-height:110px; margin-top:0; }
+#promptZone .field.grow textarea{ flex:1 1 auto; height:auto; min-height:100px; resize:none; }
+#promptZone .field.neg{ flex:0 0 auto; }
+#promptZone .field.neg textarea{ min-height:56px; height:56px; }
+#groups{ flex:0 1 auto; overflow-y:auto; overflow-x:hidden; padding-right:2px; }
+#right{ flex:1; position:relative; display:flex; flex-direction:column; min-width:0; }
+
+/* ---------- grupos colapsaveis ---------- */
+.group{ background:var(--panel); border:1px solid var(--bd); border-radius:var(--radius);
+  margin-bottom:10px; overflow:hidden; }
+.group>summary{ list-style:none; cursor:pointer; padding:10px 12px; font-weight:600;
+  display:flex; align-items:center; gap:8px; user-select:none; }
+.group>summary::-webkit-details-marker{ display:none; }
+.group>summary .chev{ margin-left:auto; color:var(--mut); transition:transform .15s; }
+.group[open]>summary .chev{ transform:rotate(90deg); }
+.group .body{ padding:4px 12px 12px; border-top:1px solid var(--bd); }
+
+/* ---------- campos ---------- */
+.field{ margin:9px 0; }
+.field>.lbl{ font-size:12px; color:var(--mut); margin-bottom:4px; }
+.row{ display:flex; gap:10px; }
+.row>.field{ flex:1; margin:9px 0; }
+textarea,input[type=text],input[type=number],select{ width:100%; background:var(--panel2);
+  border:1px solid var(--bd); border-radius:8px; padding:8px 10px; outline:none; }
+textarea:focus,input:focus,select:focus{ border-color:var(--acc); }
+textarea{ resize:vertical; min-height:70px; }
+.field>.lbl{ display:flex; align-items:center; gap:8px; }
+.mini{ font-size:11.5px; color:var(--mut); margin:6px 0; line-height:1.35; }
+.inline{ display:flex; gap:8px; flex-wrap:wrap; margin:6px 0; }
+.mini-btn{ margin-left:auto; font-size:11px; padding:3px 8px; border-radius:6px;
+  background:var(--panel); border:1px solid var(--bd); color:var(--mut); }
+.mini-btn:hover{ color:var(--fg); border-color:var(--acc); }
+.inline .mini-btn{ margin-left:0; }
+.slider{ display:flex; align-items:center; gap:10px; }
+.slider input[type=range]{ flex:1; accent-color:var(--acc); }
+.slider .val{ width:44px; text-align:right; color:var(--mut); font-variant-numeric:tabular-nums; }
+.chk{ display:flex; align-items:center; gap:8px; margin:9px 0; }
+.chk input{ accent-color:var(--acc); width:16px; height:16px; }
+
+/* ---------- botoes ---------- */
+.actions{ display:flex; gap:8px; margin:4px 0 12px; flex-wrap:wrap; }
+button{ background:var(--panel); border:1px solid var(--bd); border-radius:8px;
+  padding:9px 12px; cursor:pointer; transition:.12s; }
+button:hover{ border-color:var(--acc); }
+button.primary{ background:var(--acc2); border-color:var(--acc2); font-weight:700; flex:1; }
+button.primary:hover{ background:var(--acc); }
+button.danger{ border-color:var(--err); color:var(--err); }
+button:disabled{ opacity:.45; cursor:not-allowed; }
+
+.actions.tight{ margin:0 0 10px; align-items:center; }
+.actions.tight .chk{ margin:0; flex:1; font-size:13px; }
+.actions.tight button{ padding:7px 10px; font-size:12.5px; }
+
+/* ---------- custo previsto ---------- */
+#custo{ margin-top:10px; padding:8px 10px; border:1px solid var(--bd); border-radius:8px;
+  background:var(--panel2); font-size:11.5px; line-height:1.5; }
+#custo .custo-l{ color:#c3ccd8; }
+#custo .custo-l.dim{ color:var(--mut); font-size:11px; margin-top:4px; }
+#custo b.ok{ color:var(--ok); } #custo b.warn{ color:var(--warn); } #custo b.err{ color:var(--err); }
+#custo i{ color:var(--mut); font-style:normal; }
+
+/* ---------- centros manuais ---------- */
+.centro{ border:1px solid var(--bd); border-radius:8px; padding:6px 8px; margin:6px 0;
+  background:var(--panel2); }
+.centro .chk{ margin:2px 0; }
+.badge{ font-size:10.5px; color:var(--acc); border:1px solid var(--bd); border-radius:20px;
+  padding:1px 7px; margin-left:auto; }
+.badge.dim{ color:var(--mut); margin-left:4px; }
+.tagwrap>summary{ cursor:pointer; font-size:11.5px; color:var(--mut); padding:3px 0; }
+.tagbox{ display:flex; flex-wrap:wrap; gap:4px 10px; max-height:150px; overflow-y:auto;
+  padding:4px 0 2px; }
+.tagbox .tag{ font-size:11.5px; color:#c3ccd8; display:flex; align-items:center; gap:4px; }
+.tagbox input{ accent-color:var(--acc); }
+
+/* ---------- camadas de hires / alvos do detailer ---------- */
+.camada,.det{ border:1px solid var(--bd); border-radius:8px; padding:4px 8px 8px;
+  margin:8px 0; background:var(--panel2); }
+.det-h{ display:flex; align-items:center; gap:8px; color:var(--fg); font-size:12.5px;
+  margin:6px 0 4px; }
+.det textarea{ min-height:52px; }
+.camada .row>.field,.det .row>.field{ margin:6px 0; }
+
+/* ---------- visor (direita) ---------- */
+#stageBar{ padding:8px 14px; border-bottom:1px solid var(--bd); color:var(--mut);
+  font-size:13px; display:flex; align-items:center; gap:10px; background:var(--panel2); }
+#stage{ min-width:150px; max-width:38%; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; }
+/* margem a direita = largura do balao de ajuda: a barra nao passa por baixo dele.
+   Com a ajuda desligada o espaco volta p/ a barra. */
+#pbar{ flex:1; height:6px; background:var(--panel); border-radius:4px; overflow:hidden;
+  margin-right:344px; }
+body.sem-hint #pbar{ margin-right:0; }
+#hintBtn{ opacity:.55; }
+#hintBtn.on{ opacity:1; color:var(--acc); border-color:var(--bd); }
+#pfill{ height:100%; width:0; background:var(--acc); transition:width .2s; }
+#viewWrap{ flex:1; display:flex; align-items:center; justify-content:center; padding:16px;
+  overflow:hidden; background:
+    repeating-conic-gradient(#0e141d 0% 25%,#0b0f16 0% 50%) 50%/22px 22px; }
+#viewImg{ max-width:100%; max-height:100%; object-fit:contain; border-radius:8px;
+  box-shadow:0 6px 24px rgba(0,0,0,.5); display:none; }
+#viewEmpty{ color:var(--mut); font-size:15px; }
+/* log: o traceback do worker precisa aparecer NA UI — antes so restava "rc=1" e o
+   motivo (ex.: upscaler invalido) ficava escondido no arquivo de log. */
+#logBox{ display:none; width:100%; height:100%; overflow:auto; margin:0; padding:12px;
+  background:var(--panel2); border:1px solid var(--bd); border-radius:8px;
+  color:#e6b3ad; font:12px/1.5 Consolas,ui-monospace,monospace; white-space:pre-wrap; }
+#avisos{ padding:0 14px; }
+#avisos .aviso{ display:flex; align-items:center; gap:10px; margin:6px 0;
+  padding:7px 10px; border:1px solid var(--warn); border-left-width:3px;
+  border-radius:8px; background:rgba(210,153,34,.10); color:#f0d9a8;
+  font-size:12px; line-height:1.4; }
+#avisos .aviso button{ margin-left:auto; color:var(--warn); }
+#etapas{ padding:6px 14px; border-top:1px solid var(--bd); background:var(--panel2);
+  color:var(--mut); font-size:11.5px; min-height:24px; }
+#stageBar .mini-btn{ margin-left:0; }
+
+/* ---------- editor de mascara (i2i) ---------- */
+#i2iPalco{ position:relative; max-width:100%; max-height:100%; line-height:0; }
+#i2iPalco canvas{ display:block; max-width:100%; max-height:calc(100vh - 260px);
+  border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.5); }
+#i2iMask{ position:absolute; left:0; top:0; cursor:crosshair; }
+#colI2i{ overflow-y:auto; flex:1; display:flex; flex-direction:column; }
+#colI2i .field.grow{ flex:0 0 auto; }
+#colI2i .field.grow textarea{ min-height:90px; }
+#i2iCusto{ border:1px solid var(--bd); border-radius:8px; padding:7px 9px;
+  background:var(--panel2); }
+
+/* ---------- balao de ajuda (canto superior direito) ---------- */
+#help{ position:absolute; top:12px; right:12px; width:320px; z-index:50;
+  background:rgba(19,26,36,.97); border:1px solid var(--bd); border-radius:var(--radius);
+  box-shadow:0 8px 30px rgba(0,0,0,.55); backdrop-filter:blur(3px);
+  padding:12px 14px; pointer-events:none; transition:border-color .15s; }
+#help.lit{ border-color:var(--acc); }
+#help .h-t{ font-weight:700; font-size:14px; margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+#help .h-t .dot{ width:8px; height:8px; border-radius:50%; background:var(--acc); }
+#help .h-b{ font-size:13px; color:#d3dbe6; }
+#help .h-line{ display:flex; gap:7px; margin-top:8px; font-size:12.5px; }
+#help .h-line .k{ flex:0 0 74px; color:var(--mut); }
+#help .h-line.img .k{ color:var(--acc); }
+#help .h-line.hw .k{ color:var(--warn); }
+#help .h-hint{ margin-top:10px; font-size:11.5px; color:var(--mut); font-style:italic; }
+
+/* ---- agenda ---- */
+.agtab{width:100%;border-collapse:collapse;table-layout:fixed}
+.agtab th{font-size:11px;opacity:.55;font-weight:600;padding:4px 0}
+.agtab td{height:44px;vertical-align:top;border:1px solid rgba(255,255,255,.06);
+  border-radius:4px;padding:2px 4px;cursor:pointer;transition:background .12s}
+.agtab td.vazio{border-color:transparent;cursor:default}
+.agtab td.dia:hover{background:rgba(255,255,255,.06)}
+.agtab td.hoje{outline:1px solid rgba(120,170,255,.55)}
+.agtab td.sel{background:rgba(120,170,255,.16)}
+.agtab td .n{font-size:12px;opacity:.8}
+.agtab .pt{font-size:10px;margin-right:2px}
+.agtab .pt.pub{color:#7ee787}
+.agtab .pt.agd{color:#ffa657}
+
+/* ---- alertas de memoria ---- */
+.ram-barra{height:10px;border-radius:5px;background:rgba(255,255,255,.08);overflow:hidden}
+.ram-barra > i{display:block;height:100%;transition:width .25s}
+.ram-ok   > i{background:#7ee787}
+.ram-n1   > i{background:#e3b341}
+.ram-n2   > i{background:#ffa657}
+.ram-crit > i{background:#ff7b72}
+.ram-tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.ram-tag.n1{background:rgba(227,179,65,.18);color:#e3b341}
+.ram-tag.n2{background:rgba(255,166,87,.20);color:#ffa657}
+.ram-tag.crit{background:rgba(255,123,114,.22);color:#ff7b72}
+@keyframes pulsa{0%,100%{opacity:1}50%{opacity:.45}}
+.ram-tag.n2, .ram-tag.crit{animation:pulsa 1.1s ease-in-out infinite}
+
+/* aba piscando quando ha overload nivel 2+ : diz ONDE arrumar */
+@keyframes piscaAba{
+  0%,100%{ background:transparent; color:inherit }
+  50%{ background:rgba(255,166,87,.28); color:#ffd7b0 }
+}
+.aba.piscando{ animation:piscaAba 1s steps(1) infinite; font-weight:700 }
+.aba.piscando::after{ content:" ⚠"; }
+
+/* ---- barra de RAM com previsao ----
+   Camadas: uso atual (solido) + previsao dos centros (hachurado) sobre a mesma
+   trilha, com marcas fixas em 80/83% e uma agulha no ponto previsto. Assim da'
+   p/ ver ANTES de gerar se a configuracao cabe, em vez de descobrir no erro. */
+.ram-barra{position:relative;height:16px;border-radius:8px;
+  background:rgba(255,255,255,.08);overflow:hidden}
+.ram-barra > .usado{position:absolute;left:0;top:0;height:100%;transition:width .25s}
+.ram-barra > .previsto{position:absolute;top:0;height:100%;transition:all .25s;
+  background:repeating-linear-gradient(45deg,rgba(255,255,255,.30) 0 5px,
+    rgba(255,255,255,.10) 5px 10px)}
+.ram-barra > .marca{position:absolute;top:0;width:2px;height:100%;z-index:3}
+.ram-barra > .marca.alerta{background:rgba(227,179,65,.85)}
+.ram-barra > .marca.crit{background:rgba(255,123,114,.95)}
+.ram-barra > .agulha{position:absolute;top:-3px;width:3px;height:22px;z-index:4;
+  background:#fff;box-shadow:0 0 4px rgba(0,0,0,.8);transition:left .25s}
+.ram-ok   > .usado{background:#7ee787}
+.ram-n1   > .usado{background:#e3b341}
+.ram-n2   > .usado{background:#ffa657}
+.ram-crit > .usado{background:#ff7b72}
+
+/* previsao acima de 100% da RAM fisica: nao cabe de jeito nenhum */
+@keyframes flashImpossivel{
+  0%,100%{ background:rgba(255,123,114,.12); box-shadow:none }
+  50%{ background:rgba(255,123,114,.55); box-shadow:0 0 12px rgba(255,123,114,.8) }
+}
+.ram-barra.impossivel{ animation:flashImpossivel .7s ease-in-out infinite }
+.ram-impossivel{ color:#ff7b72; font-weight:700 }
+
+/* legenda da barra de RAM: cada simbolo do grafico explicado uma vez */
+.ram-leg{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:7px;font-size:11px;opacity:.75}
+.ram-leg > span{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.ram-leg .sw{width:13px;height:9px;border-radius:2px;flex:none;
+  border:1px solid rgba(255,255,255,.12)}
+.ram-leg .sw.usado{background:#7ee787}
+.ram-leg .sw.usado.n1{background:#e3b341}
+.ram-leg .sw.usado.n2{background:#ffa657}
+.ram-leg .sw.usado.crit{background:#ff7b72}
+.ram-leg .sw.prev{background:repeating-linear-gradient(45deg,rgba(255,255,255,.35) 0 4px,
+  rgba(255,255,255,.10) 4px 8px)}
+.ram-leg .sw.livre{background:rgba(255,255,255,.08)}
+.ram-leg .sw.ag{width:3px;height:13px;background:#fff;border:none}
+.ram-leg .sw.mk-al{width:3px;height:13px;background:rgba(227,179,65,.9);border:none}
+.ram-leg .sw.mk-cr{width:3px;height:13px;background:rgba(255,123,114,.95);border:none}
+
+/* ---- detailer: ordem por arrasto ----
+   A ordem e' semantica (quem roda primeiro), entao precisa ser visivel e
+   manipulavel — numero a esquerda e alca de arraste. */
+.det{position:relative;transition:opacity .15s, transform .15s}
+.det.arrastando{opacity:.4}
+.det.alvo{box-shadow:inset 0 3px 0 0 #7ee787}
+.det-h{display:flex;align-items:center;gap:7px}
+.det-ord{display:inline-flex;align-items:center;justify-content:center;
+  min-width:19px;height:19px;border-radius:50%;font-size:11px;font-weight:700;
+  background:rgba(120,170,255,.18);color:#9dc3ff;flex:none}
+.det-pega{cursor:grab;opacity:.45;font-size:14px;letter-spacing:-2px;flex:none}
+.det-pega:active{cursor:grabbing}
+.det-h b{flex:1}

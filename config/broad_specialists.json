@@ -1,0 +1,11 @@
+{
+  "descricao": "6 especialistas ABRANGENTES em eixos ortogonais (GSMDE, testes multi-centro). Cada um = conjunto LIMITADO de tags-nucleo (nao dilui). Uma imagem entra se tiver QUALQUER tag do conjunto. Eixos separados de proposito (person x pose x expression x scenary x camera x style compoem bem no spill).",
+  "grupos": {
+    "person": ["1girl", "1boy", "solo", "breasts", "thighs", "navel", "collarbone", "muscular", "curvy", "petite", "wide_hips", "abs"],
+    "expression": ["smile", "blush", "open_mouth", "closed_eyes", "angry", "surprised", "crying", "smirk", "pout", "expressionless", "tongue_out", "grin", "light_smile", "sad"],
+    "pose": ["standing", "sitting", "lying", "kneeling", "walking", "running", "arms_up", "leaning", "stretching", "jumping", "squatting", "arms_behind_back", "outstretched_arms", "crossed_arms"],
+    "scenary": ["outdoors", "indoors", "sky", "cloud", "tree", "forest", "ocean", "cityscape", "building", "room", "mountain", "sunset", "night", "water", "grass", "flower_field"],
+    "camera": ["from_below", "from_above", "from_side", "close-up", "portrait", "full_body", "upper_body", "cowboy_shot", "dutch_angle", "depth_of_field", "wide_shot", "pov", "foreshortening"],
+    "style": ["monochrome", "greyscale", "sketch", "watercolor_(medium)", "traditional_media", "chibi", "lineart", "flat_color", "oil_painting", "pixel_art", "1980s_(style)", "retro_artstyle"]
+  }
+}

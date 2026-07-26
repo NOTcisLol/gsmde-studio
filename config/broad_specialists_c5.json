@@ -1,0 +1,63 @@
+{
+  "cluster": "c5",
+  "papel": "personagem unico (multiverso) — centros por VARIANTE de figurino, nucleo compartilhado",
+  "tipo": "SPEC_DE_COLETA",
+  "motivo": "O id2tags.parquet foi filtrado p/ tags GERAIS/conceituais — NAO tem tags de personagem (hatsune_miku=0, vocaloid=0). Logo este batch NAO sai do dump: cada centro precisa de dataset PROPRIO, baixado por tag de booru (danbooru/gelbooru API) ou coletado a mao (versao BR). Descritores existem no dump (aqua_hair 128k, twintails 953k, detached_sleeves 450k) mas so aproximam a Miku por co-ocorrencia, com ruido de outros personagens.",
+  "personagem": "hatsune_miku",
+  "ideia": "DOIS grupos. (1) Familia JP: nucleo compartilhado (miku_core) + figurinos por variante (jp/racing/append/snow) — o compartilhamento vale AQUI (core+outfit). (2) brazilian_miku: personagem DISTINTO e standalone (corpo/pele/cabelo/rosto proprios) — NAO compartilha o core JP, e' 1 adapter inteiro. Descoberta do usuario: JP e BR sao personagens diferentes, nao versoes de roupa.",
+  "centros": {
+    "miku_core": {
+      "papel": "identidade base — rosto, twintails teal, headphones. O 'sempre ligado'.",
+      "fonte": "booru: hatsune_miku (amostra ampla, aparencia default)",
+      "prioridade": "alta",
+      "alvo_imgs": 800,
+      "descritores_proxy": ["aqua_hair", "aqua_eyes", "twintails", "very_long_hair", "headphones"]
+    },
+    "outfit_jp": {
+      "papel": "figurino Crypton canonico — gola cinza, gravata teal, mangas destacadas, saia preta",
+      "fonte": "booru: hatsune_miku + (default costume / detached_sleeves + necktie + grey_shirt)",
+      "prioridade": "alta (FOCO: original japonesa)",
+      "alvo_imgs": 600
+    },
+    "brazilian_miku": {
+      "papel": "PERSONAGEM DISTINTO (nao e' um outfit da JP). Fan design viral 2024 (@doodly_sheery). Corpo, pele, cabelo, rosto E figurino diferentes -> 1 adapter unico, nao decomposto (dado escasso demais p/ facetas).",
+      "fonte": "COLETA CUSTOM — 2024, FORA do snapshot local (que termina em id~2.2M/~2016) -> ZERO local. Juntar a mao de twitter/x (@doodly_sheery e outros), pixiv, pinterest.",
+      "prioridade": "alta (FOCO)",
+      "alvo_imgs": "o que der (~150-300); treino leve por escassez",
+      "definicao_visual": {
+        "pele": "mais bronzeada/morena",
+        "cabelo": "mais volumoso; tom puxado p/ aqua-verde (mais verde que a JP)",
+        "corpo": "cintura fina, quadris levemente mais largos, altura maior, seios mais volumosos",
+        "rosto": "eyeliner sutil porem de tamanho exagerado",
+        "figurino": "croptop da selecao brasileira de futebol (amarelo/verde, '01'); mini shorts jeans desabotoados; bikini/top e alcas parcialmente visiveis",
+        "acessorios": "bijuteria classica da Bahia (sementes coloridas) na cintura, pulsos e pescoco; oculos de sol em algumas representacoes; brincos de argola",
+        "props_recorrentes": "lata/copo de guarana, chinelo, sol/praia"
+      },
+      "estrategia": "adapter de personagem unico + definicao textual acima como macro de prompt reutilizavel (compensa a escassez de dado)."
+    },
+    "outfit_racing": {
+      "papel": "Racing Miku (GoodSmile Racing) — traje de automobilismo, muda por ano",
+      "fonte": "booru: racing_miku",
+      "prioridade": "media",
+      "alvo_imgs": 400
+    },
+    "outfit_append": {
+      "papel": "design Append — versao mais suave/adulta",
+      "fonte": "booru: hatsune_miku_(append)",
+      "prioridade": "media",
+      "alvo_imgs": 400
+    },
+    "outfit_snow": {
+      "papel": "Snow/Yuki Miku — branco/gelo, tema de inverno (muda por ano)",
+      "fonte": "booru: yuki_miku",
+      "prioridade": "media",
+      "alvo_imgs": 400
+    }
+  },
+  "pendencias": [
+    "escrever um coletor de booru (danbooru/gelbooru API) por tag -> pasta por centro (usar a ponte do Colab p/ baixar sem gastar a net local)",
+    "curar a mao a versao BR (fora de booru)",
+    "definir criterio de dedup entre core e os figurinos (evitar o mesmo post em 2 centros)",
+    "so entao rodar o run_specialist_queue nos 6"
+  ]
+}

@@ -1,0 +1,37 @@
+# ---- CREDENCIAIS: nunca versionar ----
+control.token
+civitai_auth.bin
+*.token
+*_auth.bin
+prefs.json
+launcher.pid
+
+# ---- pesos e dados (GB) ----
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.parquet
+models/
+centros_hf/
+centros_civitai/
+specialists_*/
+outputs/
+Trainer_outputs/
+
+# ---- ambiente ----
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+*.parcial
+
+# clusters GERADOS a partir da biblioteca do usuario (centros_catalogo.py):
+# listam os nomes dos LoRAs pessoais dele — nao sao parte do projeto.
+config/broad_specialists_local.json
+config/broad_specialists_hf.json
+config/broad_specialists_civitai.json
+config/centros_uso.json
+config/tag_freq_global.json

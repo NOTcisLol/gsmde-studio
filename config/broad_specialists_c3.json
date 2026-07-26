@@ -1,0 +1,230 @@
+{
+  "cluster": "c3",
+  "papel": "camada de composicao / overlays",
+  "fonte": "disco E:",
+  "criterio_min_imgs": 200,
+  "papeis": {
+    "objects_foreground": "objetos que ocluem a cena",
+    "particles": "particulas de primeiro plano",
+    "handling": "objeto na mao (precisa detector de mao na colagem)",
+    "scene_effect": "filtro sobre a imagem toda (janela temporal: fim)",
+    "scene_dynamics": "efeito sobre outra coisa (sub-contexto)",
+    "color_grade": "tom/cor sobre a cena pronta (janela: fim)"
+  },
+  "grupos": {
+    "objects_foreground": [
+      "flower",
+      "book",
+      "tree",
+      "pillow",
+      "bed",
+      "leaf",
+      "window",
+      "chair",
+      "table",
+      "grass",
+      "plant",
+      "curtains",
+      "desk",
+      "couch",
+      "bookshelf",
+      "fence"
+    ],
+    "particles": [
+      "star_(symbol)",
+      "petals",
+      "sparkle",
+      "glowing",
+      "leaf",
+      "bubble",
+      "rain",
+      "smoke",
+      "snowing",
+      "light_particles",
+      "air_bubble",
+      "snowflakes",
+      "splashing",
+      "confetti",
+      "water_drop"
+    ],
+    "handling": [
+      "holding",
+      "bag",
+      "cup",
+      "umbrella",
+      "holding_hands",
+      "bottle",
+      "teacup",
+      "bouquet",
+      "lantern",
+      "holding_food",
+      "leash",
+      "basket",
+      "holding_book",
+      "handbag",
+      "smartphone",
+      "holding_umbrella"
+    ],
+    "scene_effect": [
+      "monochrome",
+      "greyscale",
+      "retro_artstyle",
+      "halftone",
+      "1990s_(style)",
+      "chromatic_aberration",
+      "sepia",
+      "1980s_(style)"
+    ],
+    "scene_dynamics": [
+      "glowing",
+      "wind",
+      "fire",
+      "floating_hair",
+      "smoke",
+      "steam",
+      "lens_flare",
+      "light_rays",
+      "motion_lines",
+      "wind_lift",
+      "magic",
+      "motion_blur",
+      "sunbeam",
+      "aura",
+      "splashing",
+      "energy"
+    ],
+    "color_grade": [
+      "monochrome",
+      "dark",
+      "limited_palette",
+      "gradient",
+      "colorful",
+      "muted_color",
+      "high_contrast",
+      "pale_color"
+    ]
+  },
+  "relatorio": {
+    "objects_foreground": {
+      "testadas": 30,
+      "com_dados": 29,
+      "usadas": 16,
+      "imgs": {
+        "flower": 46731,
+        "book": 14237,
+        "tree": 13276,
+        "pillow": 9681,
+        "bed": 9572,
+        "leaf": 8404,
+        "window": 7503,
+        "chair": 6662,
+        "table": 5928,
+        "grass": 4532,
+        "plant": 4508,
+        "curtains": 3619,
+        "desk": 2994,
+        "couch": 2820,
+        "bookshelf": 1656,
+        "fence": 1595
+      }
+    },
+    "particles": {
+      "testadas": 21,
+      "com_dados": 15,
+      "usadas": 15,
+      "imgs": {
+        "star_(symbol)": 20190,
+        "petals": 11621,
+        "sparkle": 9492,
+        "glowing": 9485,
+        "leaf": 8404,
+        "bubble": 3431,
+        "rain": 3079,
+        "smoke": 3016,
+        "snowing": 2696,
+        "light_particles": 2113,
+        "air_bubble": 1767,
+        "snowflakes": 1516,
+        "splashing": 1012,
+        "confetti": 918,
+        "water_drop": 885
+      }
+    },
+    "handling": {
+      "testadas": 24,
+      "com_dados": 22,
+      "usadas": 16,
+      "imgs": {
+        "holding": 44456,
+        "bag": 15345,
+        "cup": 10589,
+        "umbrella": 10249,
+        "holding_hands": 9718,
+        "bottle": 4851,
+        "teacup": 3244,
+        "bouquet": 2175,
+        "lantern": 2030,
+        "holding_food": 1930,
+        "leash": 1882,
+        "basket": 1843,
+        "holding_book": 1774,
+        "handbag": 1693,
+        "smartphone": 1527,
+        "holding_umbrella": 1102
+      }
+    },
+    "scene_effect": {
+      "testadas": 15,
+      "com_dados": 8,
+      "usadas": 8,
+      "imgs": {
+        "monochrome": 93052,
+        "greyscale": 68992,
+        "retro_artstyle": 1345,
+        "halftone": 1206,
+        "1990s_(style)": 765,
+        "chromatic_aberration": 751,
+        "sepia": 723,
+        "1980s_(style)": 366
+      }
+    },
+    "scene_dynamics": {
+      "testadas": 19,
+      "com_dados": 18,
+      "usadas": 16,
+      "imgs": {
+        "glowing": 9485,
+        "wind": 5632,
+        "fire": 5363,
+        "floating_hair": 3747,
+        "smoke": 3016,
+        "steam": 2949,
+        "lens_flare": 2829,
+        "light_rays": 2023,
+        "motion_lines": 1875,
+        "wind_lift": 1689,
+        "magic": 1648,
+        "motion_blur": 1297,
+        "sunbeam": 1154,
+        "aura": 1020,
+        "splashing": 1012,
+        "energy": 513
+      }
+    },
+    "color_grade": {
+      "testadas": 15,
+      "com_dados": 8,
+      "usadas": 8,
+      "imgs": {
+        "monochrome": 93052,
+        "dark": 1508,
+        "limited_palette": 792,
+        "gradient": 693,
+        "colorful": 465,
+        "muted_color": 419,
+        "high_contrast": 257,
+        "pale_color": 232
+      }
+    }
+  }
+}

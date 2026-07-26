@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GSMDE Studio</title>
+<link rel="icon" href="assets/favicon_256.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="banner" style="background-image:url('assets/banner.png')">
+  <div class="veil"></div>
+  <div class="brand">
+    <img class="logo" src="assets/favicon_256.png" alt="GSMDE">
+    <div class="name">GSMDE&nbsp;Studio</div>
+    <div class="ver" id="verTag">v1.1.0 · Mosaico</div>
+  </div>
+</div>
+
+<!-- abas: trocam o CONTEUDO DA COLUNA da esquerda; o visor a direita continua -->
+<div id="abas">
+  <button class="aba ativa" data-aba="gerar">🎨 Gerar</button>
+  <button class="aba" data-aba="i2i" data-help="abaI2i">🖌️ i2i (máscara)</button>
+  <button class="aba" data-aba="modelos" data-help="abaModelos">📦 Modelos</button>
+  <button class="aba" data-aba="agenda" data-help="abaAgenda">🗓️ Agenda</button>
+  <button class="aba" data-aba="config" data-help="abaConfig">⚙️ Configuração</button>
+</div>
+
+<div id="main">
+  <!-- ================= CONTROLES ================= -->
+  <div id="left">
+
+    <!-- zona do prompt: cresce com o espaco que os menus recolhidos devolvem -->
+    <div id="promptZone">
+      <div class="field grow" data-help="pos">
+        <div class="lbl">PROMPT POSITIVO
+          <button id="toggleAll" class="mini-btn" title="recolher/expandir todos os menus">⤢ recolher menus</button>
+        </div>
+        <textarea id="pos" placeholder="descreva a imagem…"></textarea>
+      </div>
+      <div class="field neg" data-help="neg">
+        <div class="lbl">PROMPT NEGATIVO</div>
+        <textarea id="neg" placeholder="opcional"></textarea>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="genBtn" class="primary">Gerar ▶</button>
+      <button id="stopBtn" class="danger" data-help="parar"
+              title="Para a geração e encerra o worker (libera a VRAM). Sempre disponível.">■</button>
+    </div>
+    <div class="actions tight">
+      <label class="chk inf" data-help="infinita"><input type="checkbox" id="infinita"> ♾️ Geração infinita</label>
+      <button id="reciclar" data-help="reciclar">♻️ Reciclar de uma imagem</button>
+    </div>
+
+    <div id="groups">
+
+    <details class="group" open data-help="auto">
+      <summary>🧭 Roteamento <span class="chev">›</span></summary>
+      <div class="body">
+        <label class="chk" data-help="auto"><input type="checkbox" id="auto" checked>
+          Automático — lê o prompt e escolhe os centros</label>
+        <div class="field" data-help="maxCentros">
+          <div class="lbl">Máx. centros</div>
+          <div class="inline">
+            <input id="maxCentros" type="number" min="1" step="1" value="6" style="width:90px">
+            <span class="mini" id="maxCentros_v"></span>
+          </div>
+        </div>
+        <button id="verCentros" data-help="verCentros">👁 Ver o que ele escolhe</button>
+        <div class="lbl" id="routeOut" style="margin-top:8px"></div>
+      </div>
+    </details>
+
+    <!-- so aparece com o automatico DESLIGADO -->
+    <details class="group" id="gCentros" data-help="centrosManual">
+      <summary>🎛️ Centros (manual) <span class="chev">›</span></summary>
+      <div class="body">
+        <div class="mini">Marque o centro para ativá-lo. As tags são <b>opcionais</b>: elas só
+          localizam o território — <b>sem nenhuma marcada, o centro age na imagem toda</b>.</div>
+        <div class="inline">
+          <button id="centrosNone" class="mini-btn">limpar seleção</button>
+          <button id="centrosDoAuto" class="mini-btn">preencher com o automático</button>
+        </div>
+        <div id="centrosBox" class="mini">carregando…</div>
+      </div>
+    </details>
+
+    <details class="group" open>
+      <summary>⚙️ Geração <span class="chev">›</span></summary>
+      <div class="body">
+        <div class="field" data-help="escala">
+          <div class="lbl">Força dos especialistas <span class="val" id="escala_v">0.80</span></div>
+          <div class="slider"><input type="range" id="escala" min="0" max="1.5" step="0.05" value="0.8"></div>
+        </div>
+        <div class="field" data-help="gw">
+          <div class="lbl">Peso dos globais <span class="val" id="gw_v">0.25</span></div>
+          <div class="slider"><input type="range" id="gw" min="0" max="1" step="0.05" value="0.25"></div>
+        </div>
+        <div class="field" data-help="backbone">
+          <div class="lbl">Backbone dominante <span class="val" id="backbone_v">0.60</span></div>
+          <div class="slider"><input type="range" id="backbone" min="0" max="1" step="0.05" value="0.6"></div>
+        </div>
+        <div class="row">
+          <div class="field" data-help="size"><div class="lbl">Largura</div>
+            <input id="largura" type="number" step="8" min="256" value="768"></div>
+          <div class="field" data-help="size"><div class="lbl">Altura</div>
+            <input id="altura" type="number" step="8" min="256" value="768"></div>
+        </div>
+        <div class="mini" id="propInfo" data-help="size"></div>
+        <div class="row">
+          <div class="field" data-help="steps"><div class="lbl">Passos</div>
+            <input id="steps" type="number" value="26"></div>
+          <div class="field" data-help="cfg"><div class="lbl">CFG</div>
+            <input id="cfg" type="number" step="0.5" value="4.5"></div>
+        </div>
+        <div class="field" data-help="seed"><div class="lbl">Seed</div>
+          <input id="seed" type="number" value="-1"></div>
+        <label class="chk" data-help="seedRand"><input type="checkbox" id="seedRand" checked> Seed aleatória</label>
+        <label class="chk" data-help="limpar"><input type="checkbox" id="limpar"> 🧹 Limpar intermediárias antes de gerar</label>
+        <div id="custo" data-help="custo"></div>
+      </div>
+    </details>
+
+    <details class="group" data-help="hires">
+      <summary>🔍 Upscaler + Hires <span class="chev">›</span></summary>
+      <div class="body">
+        <label class="chk" data-help="hires"><input type="checkbox" id="hires" checked> Ativar refino em camadas</label>
+        <div id="hiresRows">
+          <div class="field" data-help="upscaler"><div class="lbl">Upscaler</div>
+            <select id="upscaler">
+              <option value="anime">RealESRGAN anime 6B</option>
+              <option value="real">RealESRGAN x4plus</option>
+              <option value="sharp">ESRGAN UltraSharp 4x</option>
+            </select></div>
+          <div id="camadasBox" data-help="camadas"></div>
+          <div class="inline">
+            <button id="camAdd" class="mini-btn">+ camada</button>
+            <button id="camDel" class="mini-btn">− última</button>
+          </div>
+          <div class="mini">Quanto <b>maior</b> o upscale, <b>menor</b> o denoise e <b>mais</b> passos.</div>
+        </div>
+      </div>
+    </details>
+
+    <details class="group" data-help="detailer">
+      <summary>🎯 Detailer <span class="chev">›</span></summary>
+      <div class="body">
+        <div class="mini">Cada alvo roda um inpaint YOLO com <b>prompt próprio</b>
+          (vazio = usa o positivo da cena).</div>
+        <div id="detList"></div>
+        <select id="detAdd"><option value="">+ adicionar alvo…</option></select>
+      </div>
+    </details>
+
+    <details class="group" data-help="ultra">
+      <summary>🧩 Ultra tiled <span class="chev">›</span></summary>
+      <div class="body">
+        <label class="chk" data-help="ultra"><input type="checkbox" id="ultra"> Ativar ultra (hires em pedaços)</label>
+        <div id="ultraRows">
+          <div class="row">
+            <div class="field" data-help="ultraScale"><div class="lbl">Escala</div>
+              <input id="ultraScale" type="number" step="0.1" value="1.5"></div>
+            <div class="field" data-help="ultraTile"><div class="lbl">Pedaço (core)</div>
+              <input id="ultraTile" type="number" step="64" value="512"></div>
+          </div>
+          <div class="row">
+            <div class="field" data-help="ultraHalo"><div class="lbl">Halo</div>
+              <input id="ultraPad" type="number" step="16" value="64"></div>
+            <div class="field" data-help="ultraHalo"><div class="lbl">Sobreposição</div>
+              <input id="ultraOv" type="number" step="16" value="96"></div>
+          </div>
+          <div class="row">
+            <div class="field" data-help="ultra"><div class="lbl">Passos</div>
+              <input id="ultraSteps" type="number" value="18"></div>
+            <div class="field" data-help="ultra"><div class="lbl">Denoise</div>
+              <input id="ultraDenoise" type="number" step="0.05" value="0.35"></div>
+          </div>
+          <div class="row">
+            <div class="field" data-help="ultra"><div class="lbl">Passes</div>
+              <input id="ultraPasses" type="number" min="1" max="3" value="1"></div>
+            <div class="field" data-help="ultra"><div class="lbl">Final scale</div>
+              <input id="ultraFinal" type="number" step="0.05" value="0.9"></div>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="group" data-help="cor">
+      <summary>🎨 Cor — luz, sombra, highlights <span class="chev">›</span></summary>
+      <div class="body">
+        <div class="mini">Aplicado no <b>FIM</b> (gerar → hires → ultra → cor), sem redesenhar detalhe.</div>
+        <div id="colorBox"></div>
+        <button id="colorReset" class="mini-btn">zerar cor</button>
+      </div>
+    </details>
+
+    <details class="group">
+      <summary>🧪 Avançado <span class="chev">›</span></summary>
+      <div class="body">
+        <label class="chk" data-help="preview"><input type="checkbox" id="preview" checked> Preview ao vivo (TAESD)</label>
+        <div class="field" data-help="preview"><div class="lbl">Preview a cada N passos</div>
+          <input id="previewEvery" type="number" value="3" min="1"></div>
+        <label class="chk" data-help="weighted"><input type="checkbox" id="weighted" checked> Pesos no prompt (A1111)</label>
+        <label class="chk" data-help="centerFocus"><input type="checkbox" id="centerFocus" checked> Foco por centro</label>
+        <div class="row">
+          <div class="field" data-help="centerFocus"><div class="lbl">Foco centro</div>
+            <input id="focusW" type="number" step="0.05" value="1.15"></div>
+          <div class="field" data-help="centerFocus"><div class="lbl">Contexto centro</div>
+            <input id="contextW" type="number" step="0.05" value="0.9"></div>
+        </div>
+        <div class="row">
+          <div class="field" data-help="maskEvery"><div class="lbl">Máscara a cada</div>
+            <input id="maskEvery" type="number" min="1" max="12" value="4"></div>
+          <div class="field" data-help="yield"><div class="lbl">Yield anti-TDR (ms)</div>
+            <input id="yieldMs" type="number" step="5" value="40"></div>
+        </div>
+        <div class="field" data-help="paginacao"><div class="lbl">Paginação dos nichos</div>
+          <select id="paginacao">
+            <option value="auto">Automática — decide pela VRAM livre</option>
+            <option value="ram">Sempre paginar — economiza VRAM, paga PCIe</option>
+            <option value="vram">Manter na placa — mais rápido, exige VRAM</option>
+          </select></div>
+        <div class="field" data-help="paginacao"><div class="lbl">Reserva p/ ativações (GB, 0 = automático)</div>
+          <input id="vramReserva" type="number" step="0.5" min="0" value="0"></div>
+        <div class="field" data-help="offloadBase"><div class="lbl">Offload do UNet base (modos do SD.Next)</div>
+          <select id="offloadBase">
+            <option value="none">Nenhum — UNet inteiro na placa (padrão)</option>
+            <option value="balanced">Balanced — parte o UNet sob um teto</option>
+            <option value="sequential">Sequential — submódulo por submódulo (esvazia mais)</option>
+            <option value="model">Model — UNet inteiro sobe/desce por chamada</option>
+            <option value="group">Group — blocos com prefetch por stream</option>
+          </select></div>
+        <div class="field" data-help="offloadBase"><div class="lbl">Teto do balanced (GB, 0 = 60% da placa)</div>
+          <input id="offloadTeto" type="number" step="0.5" min="0" value="0"></div>
+      </div>
+    </details>
+
+    </div><!-- /groups -->
+
+    <!-- ---------- coluna do i2i (mascara manual) ---------- -->
+    <div id="colI2i" style="display:none">
+      <div class="field"><div class="lbl">1. Imagem base</div>
+        <input type="file" id="i2iFile" accept="image/*">
+        <div id="i2iInfo" class="mini"></div></div>
+
+      <div class="field grow" data-help="i2iPrompt">
+        <div class="lbl">2. O que gerar DENTRO da máscara</div>
+        <textarea id="i2iPos" placeholder="descreva só o que deve aparecer na área pintada…"></textarea></div>
+
+      <details class="group" open data-help="i2iPincel">
+        <summary>3. Pincel <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="field"><div class="lbl">Tamanho <span class="val" id="i2iBrush_v">60</span></div>
+            <div class="slider"><input type="range" id="i2iBrush" min="8" max="220" step="2" value="60"></div></div>
+          <div class="inline">
+            <button id="i2iModoPintar" class="mini-btn on">pintar</button>
+            <button id="i2iModoApagar" class="mini-btn">apagar</button>
+            <button id="i2iLimpar" class="mini-btn">limpar máscara</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="group" open data-help="i2iContextos">
+        <summary>4. Os quatro contextos <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="field"><div class="lbl">🌍 Global — o que a imagem <i>é</i>
+            <span class="val" id="i2iCtxGlobal_v">0.45</span></div>
+            <div class="slider"><input type="range" id="i2iCtxGlobal" min="0" max="1" step="0.05" value="0.45"></div>
+            <div class="mini">A imagem inteira entra como referência. 0 = o modelo só
+              enxerga o recorte e redesenha “uma” coisa plausível em vez <b>daquela</b>.</div></div>
+
+          <div class="field"><div class="lbl">🏠 Vizinho — o que há em volta (px)
+            <span class="val" id="i2iHalo_v">128</span></div>
+            <div class="slider"><input type="range" id="i2iHalo" min="32" max="384" step="16" value="128"></div>
+            <div class="mini">Quanto do entorno o modelo <b>vê e não reescreve</b>.</div></div>
+
+          <div class="field"><div class="lbl">🪡 Costura — a rampa de feather (px)
+            <span class="val" id="i2iBlend_v">48</span></div>
+            <div class="slider"><input type="range" id="i2iBlend" min="8" max="160" step="8" value="48"></div>
+            <div class="mini">Só a transição na borda. Independente do vizinho.</div></div>
+
+          <div class="mini">🎯 <b>Prompt</b> é o quarto contexto e seu peso é o CFG
+            (aba Gerar). O núcleo nasce de <b>ruído puro</b> — nada de re-noise.</div>
+        </div>
+      </details>
+
+      <details class="group">
+        <summary>5. Geração <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="row">
+            <div class="field"><div class="lbl">Passos</div><input id="i2iSteps" type="number" value="30"></div>
+            <div class="field"><div class="lbl">Seed</div><input id="i2iSeed" type="number" value="-1"></div>
+          </div>
+          <label class="chk"><input type="checkbox" id="i2iSeedRand" checked> Seed aleatória</label>
+        </div>
+      </details>
+
+      <div class="actions">
+        <button id="i2iGerar" class="primary">Gerar na máscara ▶</button>
+      </div>
+      <div id="i2iCusto" class="mini"></div>
+    </div>
+
+    <!-- ---------- coluna de CONFIGURACAO (backend) ---------- -->
+    <div id="colModelos" style="display:none">
+      <div class="mini">Busca nas duas lojas. O que você baixa vira <b>centro</b>, num
+        cluster separado por origem — assim não se mistura com os treinados aqui.</div>
+
+      <div style="display:flex;gap:6px;margin:8px 0">
+        <input id="mdBusca" type="text" placeholder="ex: hands, jewelry, style…" style="flex:1" />
+        <select id="mdFonte">
+          <option value="ambas">ambas</option>
+          <option value="hf">HuggingFace</option>
+          <option value="civitai">CivitAI</option>
+        </select>
+        <button id="mdBuscar" class="mini-btn">🔎</button>
+      </div>
+      <div id="mdResultados" class="mini"></div>
+
+
+
+      <details class="group" style="margin-top:8px">
+        <summary>🔧 UNet como backbone ou centro <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="mini">Extrai o UNet de um checkpoint SDXL e mede o quanto ele
+            diverge do base com que seus centros foram treinados.</div>
+          <input id="mdUnetEnt" type="text" placeholder="caminho do .safetensors" />
+          <button id="mdExtrair" class="mini-btn">extrair UNet</button>
+          <button id="mdComparar" class="mini-btn">comparar com o base</button>
+          <div id="mdUnetSaida" class="mini" style="margin-top:6px"></div>
+        </div>
+      </details>
+
+      <details class="group" open style="margin-top:8px">
+        <summary>🌳 Centros por uso <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="mini">Quem você mais usa fica no topo e entra no pré-carregamento.
+            Uso antigo afunda sozinho (meia-vida de 21 dias).</div>
+          <button id="mdReindexar" class="mini-btn">↻ reindexar baixados</button>
+          <button id="mdRanking" class="mini-btn">ver ranking</button>
+          <div id="mdRankSaida" class="mini" style="margin-top:6px"></div>
+        </div>
+      </details>
+    </div>
+
+    <div id="colAgenda" style="display:none">
+      <div class="mini">A data de publicação fica <b>no CivitAI</b>, não aqui — seu PC pode
+        estar desligado na hora marcada que o post sai do mesmo jeito.</div>
+
+      <div id="agAvisos" class="mini" style="margin:8px 0"></div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin:8px 0">
+        <button id="agAnt" class="mini-btn">‹</button>
+        <b id="agMes" style="flex:1;text-align:center"></b>
+        <button id="agProx" class="mini-btn">›</button>
+        <button id="agRecarregar" class="mini-btn">↻</button>
+      </div>
+
+      <div id="agCal"></div>
+
+      <div id="agDia" style="display:none;margin-top:12px">
+        <b id="agDiaTitulo"></b>
+        <div id="agDiaItens" class="mini" style="margin:6px 0"></div>
+        <details class="group" open>
+          <summary>➕ Agendar post neste dia <span class="chev">›</span></summary>
+          <div class="body">
+            <label class="mini">post existente (id)</label>
+            <input id="agPostId" type="number" placeholder="id do post no CivitAI" />
+            <label class="mini">horário</label>
+            <input id="agHora" type="time" value="12:00" />
+            <button id="agSalvar" class="mini-btn">agendar</button>
+            <div class="mini" style="margin-top:6px;opacity:.7">O post precisa já existir
+              no CivitAI (com as imagens do batch). Aqui você define <i>quando</i> ele sai.</div>
+          </div>
+        </details>
+      </div>
+
+      <div style="margin-top:12px">
+        <button id="agSessao" class="mini-btn">🌐 entrar no CivitAI (navegador)</button>
+        <div class="mini" style="opacity:.7;margin-top:4px">Abre no seu navegador padrão,
+          onde o seu gerenciador de senhas funciona. O GSMDE nunca vê a sua senha.</div>
+      </div>
+    </div>
+
+    <div id="colConfig" style="display:none">
+      <div class="mini">Ajustes do <b>backend</b>, não da imagem. Ficam salvos e valem
+        para todas as gerações. Numa placa com folga, boa parte disto não é necessária.</div>
+
+      <details class="group" open data-help="caminhos">
+        <summary>📂 Pastas <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="mini">Onde o GSMDE procura modelos e onde grava. Vazio = automático.
+            Se algo aqui apontar para o lugar errado, o motor gera sem os centros —
+            sem erro, só resultado pior.</div>
+          <div id="cmAviso" class="mini" style="margin:6px 0"></div>
+          <div id="cmLista"></div>
+          <button id="cmDetectar" class="mini-btn">🔍 detectar bibliotecas</button>
+          <button id="cmSalvar" class="mini-btn">salvar</button>
+          <div id="cmDetectado" class="mini" style="margin-top:6px"></div>
+        </div>
+      </details>
+
+      <details class="group" data-help="civitai">
+        <summary>🔗 Conta CivitAI <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="mini">Opcional. O login abre no <b>seu navegador padrão</b> — a senha
+            nunca passa pelo GSMDE, e você revoga o acesso quando quiser em civitai.com.</div>
+          <div id="cvStatus" class="mini" style="margin:6px 0"></div>
+
+          <div style="margin-top:8px">
+            <label class="mini">client_id do app registrado</label>
+            <input id="cvClientId" type="text" placeholder="registre um app em civitai.com" />
+            <button id="cvLogin" class="mini-btn">🌐 entrar pelo navegador</button>
+          </div>
+
+          <details style="margin-top:10px">
+            <summary class="mini">ou usar uma API key pessoal</summary>
+            <div style="padding-top:6px">
+              <div class="mini">Mais simples, sem registrar app — mas serve só para a
+                sua própria conta. Guardada cifrada (DPAPI), nunca em texto puro.</div>
+              <input id="cvApiKey" type="password" placeholder="cole a API key" />
+              <button id="cvSalvarKey" class="mini-btn">salvar chave</button>
+            </div>
+          </details>
+
+          <button id="cvLogout" class="mini-btn" style="margin-top:10px">sair</button>
+        </div>
+      </details>
+
+      <details class="group" data-help="hf">
+        <summary>🤗 Conta Hugging Face <span class="chev">›</span></summary>
+        <div class="body">
+          <div id="hfStatus" class="mini" style="margin-bottom:6px"></div>
+          <input id="hfClientId" type="text" placeholder="client_id (public app)" />
+          <button id="hfLogin" class="mini-btn">🌐 entrar pelo navegador</button>
+          <details style="margin-top:8px">
+            <summary class="mini">ou token pessoal (hf_…)</summary>
+            <div style="padding-top:6px">
+              <input id="hfToken" type="password" placeholder="hf_..." />
+              <button id="hfSalvarToken" class="mini-btn">salvar</button>
+            </div>
+          </details>
+          <button id="hfLogout" class="mini-btn" style="margin-top:8px">sair</button>
+        </div>
+      </details>
+
+      <details class="group" open data-help="ramBuffer">
+        <summary>🧮 Buffer de RAM <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="mini">Os centros moram na RAM e sobem para a placa um por vez —
+            então quem limita quantos cabem é a RAM, não a VRAM.</div>
+          <div class="row" style="margin-top:8px">
+            <div class="field"><div class="lbl">Buffer (GB)</div>
+              <input id="ramBuf" type="number" min="0.5" step="0.5" value="10"></div>
+            <div class="field"><div class="lbl">Simular centros</div>
+              <input id="ramNc" type="number" min="1" step="1" value="6"></div>
+          </div>
+          <button id="ramSalvar" class="mini-btn">salvar buffer</button>
+          <button id="ramMedir" class="mini-btn">↻ medir</button>
+          <button id="ramMudo" class="mini-btn on">🔊 som</button>
+          <div id="ramBarra" style="margin-top:10px"></div>
+          <div id="ramSaida" class="mini" style="margin-top:6px"></div>
+        </div>
+      </details>
+
+      <details class="group" data-help="teOffload">
+        <summary>📝 Text encoder (CLIP) <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="mini">Onde o prompt é codificado. Roda <b>uma vez</b>, antes do
+            primeiro passo — depois o TE não faz mais nada.</div>
+          <div class="field" style="margin-top:8px">
+            <div class="lbl">Modo</div>
+            <select id="teOffload">
+              <option value="cpu">CPU (padrão) — não toca a placa</option>
+              <option value="sequencial">Sequencial — sobe, codifica e desce</option>
+              <option value="residente">Residente — fica na placa o tempo todo</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="lbl">Precisão</div>
+            <select id="teDtype">
+              <option value="">automática (fp16 — medido como melhor aqui)</option>
+              <option value="bf16">bf16</option>
+              <option value="fp16">fp16</option>
+              <option value="fp32">fp32</option>
+            </select>
+          </div>
+          <div id="teAviso" class="mini" style="margin-top:6px"></div>
+        </div>
+      </details>
+
+      <details class="group" open data-help="offloadBase">
+        <summary>🧠 Memória da placa <span class="chev">›</span></summary>
+        <div class="body">
+          <div id="cfgVram" class="mini"></div>
+          <button id="cfgMedir" class="mini-btn">↻ medir agora</button>
+        </div>
+      </details>
+
+      <details class="group" open data-help="paginacao">
+        <summary>📦 Onde moram os pesos <span class="chev">›</span></summary>
+        <div class="body">
+          <div id="slotPaginacao"></div>
+          <div id="slotOffload"></div>
+        </div>
+      </details>
+
+      <details class="group" data-help="yield">
+        <summary>⚙️ Execução <span class="chev">›</span></summary>
+        <div class="body"><div id="slotExec"></div></div>
+      </details>
+
+
+    </div>
+  </div>
+
+  <!-- ================= VISOR ================= -->
+  <div id="right">
+    <div id="stageBar">
+      <span id="stage">pronto</span>
+      <!-- botoes ANTES da barra: o balao de ajuda ocupa o canto superior direito -->
+      <span id="monVivo" class="mini" style="margin-right:10px"></span><button id="logBtn" class="mini-btn">log</button>
+      <button id="termBtn" class="mini-btn" data-help="terminal">🖥 terminal</button>
+      <button id="hintBtn" class="mini-btn on" data-help="hint">💡 hint</button>
+      <div id="pbar"><div id="pfill"></div></div>
+    </div>
+    <div id="viewWrap">
+      <img id="viewImg" alt="resultado">
+      <div id="viewEmpty">O resultado aparece aqui</div>
+      <pre id="logBox"></pre>
+      <!-- editor de mascara: imagem embaixo, mascara por cima em vermelho -->
+      <div id="i2iPalco" style="display:none">
+        <canvas id="i2iBase"></canvas>
+        <canvas id="i2iMask"></canvas>
+      </div>
+    </div>
+    <div id="avisos"></div>
+    <div id="etapas"></div>
+
+    <!-- balao de ajuda fixo no canto superior direito -->
+    <div id="help">
+      <div class="h-t"><span class="dot"></span><span id="h-title">GSMDE Studio</span></div>
+      <div class="h-b" id="h-body">Passe o mouse sobre qualquer controle para ver aqui o que ele faz, o efeito na imagem e o custo de hardware.</div>
+      <div class="h-line img" id="h-img" style="display:none"><span class="k">imagem</span><span class="v"></span></div>
+      <div class="h-line hw" id="h-hw" style="display:none"><span class="k">hardware</span><span class="v"></span></div>
+      <div class="h-hint" id="h-hint" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- copiar/recortar/colar no botao direito: o WebView2 nao da menu nativo
+     confiavel e navigator.clipboard nao vale em file:// — o shared usa a ponte
+     pywebview (clipboard_get/set). Mesmo arquivo da UI simplificada e das ferramentas. -->
+<script src="../shared/ctxmenu.js"></script>
+<script src="help.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

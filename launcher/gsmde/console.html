@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>GSMDE — terminal</title>
+<link rel="icon" href="assets/favicon_256.png">
+<style>
+:root{ --bg:#0b0f16; --panel:#131a24; --panel2:#0f151d; --bd:#243040;
+  --fg:#e6edf3; --mut:#8b98a9; --acc:#3b82f6; --ok:#3fb950; --err:#f85149; }
+*{ box-sizing:border-box; }
+html,body{ margin:0; height:100%; background:var(--bg); color:var(--fg);
+  font:13px/1.45 "Segoe UI",system-ui,sans-serif; overflow:hidden; }
+#bar{ display:flex; align-items:center; gap:8px; padding:8px 10px;
+  background:var(--panel2); border-bottom:1px solid var(--bd); flex-wrap:wrap; }
+#bar .dot{ width:9px; height:9px; border-radius:50%; background:var(--mut); }
+#bar .dot.on{ background:var(--ok); box-shadow:0 0 8px var(--ok); }
+#bar .dot.err{ background:var(--err); box-shadow:0 0 8px var(--err); }
+#passo{ color:var(--mut); flex:1; min-width:120px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; }
+button{ font:inherit; color:var(--fg); background:var(--panel); border:1px solid var(--bd);
+  border-radius:7px; padding:5px 10px; cursor:pointer; }
+button:hover{ border-color:var(--acc); }
+button.on{ border-color:var(--acc); color:var(--acc); }
+label.chk{ display:flex; align-items:center; gap:5px; color:var(--mut); }
+label.chk input{ accent-color:var(--acc); }
+#corpo{ height:calc(100% - 78px); display:flex; flex-direction:column; }
+#pipe{ flex:0 0 auto; max-height:52%; overflow:auto; padding:8px 12px;
+  border-bottom:1px solid var(--bd); font:12px/1.45 Consolas,ui-monospace,monospace; }
+#pipe .f{ display:flex; align-items:center; gap:8px; padding:1px 0; white-space:nowrap; }
+#pipe .ic{ width:12px; color:var(--mut); }
+#pipe .f.viva .ic{ color:var(--acc); }
+#pipe .nm{ width:170px; overflow:hidden; text-overflow:ellipsis; }
+#pipe .sb{ width:190px; color:var(--mut); overflow:hidden; text-overflow:ellipsis; }
+#pipe .bar{ width:150px; height:8px; border-radius:4px; background:var(--panel);
+  border:1px solid var(--bd); overflow:hidden; flex:0 0 auto; }
+#pipe .bar i{ display:block; height:100%; background:var(--mut); }
+#pipe .f.viva .bar i{ background:var(--acc); }
+#pipe .tm{ width:66px; text-align:right; color:#cfd8e4; }
+#pipe .rt{ width:78px; text-align:right; color:var(--mut); }
+#pipe .et{ width:74px; text-align:right; color:var(--warn); }
+#pipe .vazio{ color:var(--mut); }
+#log{ flex:1; overflow:auto; margin:0; padding:10px 12px;
+  font:12px/1.5 Consolas,ui-monospace,monospace; white-space:pre-wrap; word-break:break-word; }
+#log .l-err{ color:#ff9b93; }
+#log .l-ev{ color:#7ee787; }
+#log .l-warn{ color:#e3b341; }
+#foot{ height:26px; display:flex; align-items:center; gap:10px; padding:0 12px;
+  border-top:1px solid var(--bd); background:var(--panel2); color:var(--mut); font-size:11px; }
+#copiado{ color:var(--ok); opacity:0; transition:opacity .2s; }
+#copiado.show{ opacity:1; }
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <span class="dot" id="dot"></span>
+  <span id="passo">parado</span>
+  <label class="chk"><input type="checkbox" id="auto" checked> seguir o fim</label>
+  <button id="copiar">📋 Copiar tudo</button>
+  <button id="copiarErro">📋 Copiar só o erro</button>
+  <button id="copiarPipe">📋 Copiar pipeline</button>
+  <button id="atualizar">↻ Atualizar</button>
+  <button id="limpar">Limpar tela</button>
+</div>
+
+<div id="corpo">
+  <div id="pipe"><div class="vazio">a linha do tempo do pipeline aparece aqui quando você gerar</div></div>
+  <pre id="log">conectando…</pre>
+</div>
+
+<div id="foot">
+  <span id="arq"></span>
+  <span id="tam"></span>
+  <span id="copiado">copiado!</span>
+</div>
+
+<script src="../shared/ctxmenu.js"></script>
+<script>
+"use strict";
+const $ = (id)=> document.getElementById(id);
+const api = ()=> (window.pywebview && window.pywebview.api) || null;
+let bruto = "", timer = null;
+
+function pinta(txt){
+  // colore so o que importa na hora de achar o erro no meio dos prints do torch
+  $("log").innerHTML = txt.split("\n").map(l=>{
+    const e = l.replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+    if(/Traceback|Error|error|Exception|FAILED|rc=[1-9]/.test(l)) return `<span class="l-err">${e}</span>`;
+    if(/^\[gsmde\]|^\[worker\]|^\[detailer\]|"event"/.test(l))    return `<span class="l-ev">${e}</span>`;
+    if(/Warning|warn/i.test(l))                                    return `<span class="l-warn">${e}</span>`;
+    return e;
+  }).join("\n");
+}
+
+/* ---------- linha do tempo do pipeline ---------- */
+function hms(s){
+  if(s === null || s === undefined) return "";
+  s = Math.round(s);
+  if(s < 60) return s + "s";
+  const m = Math.floor(s/60);
+  return m + "m" + String(s % 60).padStart(2,"0");
+}
+function pintaPipe(fases){
+  const box = $("pipe");
+  if(!fases || !fases.length){
+    box.innerHTML = "<div class='vazio'>a linha do tempo do pipeline aparece aqui quando você gerar</div>";
+    return;
+  }
+  const noFim = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  box.innerHTML = fases.map(f=>{
+    const pct = f.pct === null || f.pct === undefined ? (f.aberta ? null : 100) : f.pct;
+    const cont = f.n ? `${f.i}/${f.n}` : (f.tot ? `${f.itens}/${f.tot}` : "");
+    const sub = [f.sub, cont].filter(Boolean).join("  ");
+    return `<div class="f${f.aberta ? " viva" : ""}">
+      <span class="ic">${f.aberta ? "▶" : "✓"}</span>
+      <span class="nm">${f.nome}</span>
+      <span class="sb">${sub}</span>
+      <span class="bar"><i style="width:${pct === null ? 0 : pct}%"></i></span>
+      <span class="tm">${hms(f.seg)}</span>
+      <span class="rt">${f.ritmo || ""}</span>
+      <span class="et">${f.eta !== null && f.eta !== undefined ? "ETA " + hms(f.eta) : ""}</span>
+    </div>`;
+  }).join("");
+  if(noFim) box.scrollTop = box.scrollHeight;
+}
+function pipeTexto(fases){
+  return (fases||[]).map(f=>{
+    const cont = f.n ? `${f.i}/${f.n}` : (f.tot ? `${f.itens}/${f.tot}` : "");
+    return [f.aberta ? "▶" : "✓", f.nome, f.sub, cont, hms(f.seg), f.ritmo,
+            f.eta != null ? "ETA " + hms(f.eta) : ""].filter(Boolean).join("  ");
+  }).join("\n");
+}
+
+let FASES = [];
+async function tick(){
+  const a = api(); if(!a) return;
+  const r = await a.gsmde_terminal();
+  if(!r || r.__error__){ $("passo").textContent = (r && r.__error__) || "sem resposta"; return; }
+  FASES = r.fases || [];
+  pintaPipe(FASES);
+  if(r.texto !== bruto){
+    bruto = r.texto;
+    const noFim = $("log").scrollTop + $("log").clientHeight >= $("log").scrollHeight - 40;
+    pinta(bruto);
+    if($("auto").checked || noFim) $("log").scrollTop = $("log").scrollHeight;
+  }
+  $("dot").className = "dot" + (r.running ? " on" : (r.rc ? " err" : ""));
+  $("passo").textContent = r.passo || (r.running ? "rodando…" : "parado");
+  $("arq").textContent = r.arquivo || "";
+  $("tam").textContent = r.bytes ? `· ${(r.bytes/1024).toFixed(0)} KB` : "";
+}
+
+function copia(txt){
+  const ta = document.createElement("textarea");   // file:// nem sempre da clipboard API
+  ta.value = txt; document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); }catch(e){}
+  ta.remove();
+  $("copiado").classList.add("show");
+  setTimeout(()=> $("copiado").classList.remove("show"), 1200);
+}
+
+$("copiar").addEventListener("click", ()=> copia(bruto));
+$("copiarErro").addEventListener("click", ()=>{
+  // do ultimo Traceback ate o fim: e' o que interessa colar numa conversa
+  const i = bruto.lastIndexOf("Traceback");
+  copia(i >= 0 ? bruto.slice(i) : bruto.split("\n").slice(-60).join("\n"));
+});
+$("copiarPipe").addEventListener("click", ()=> copia(pipeTexto(FASES)));
+$("atualizar").addEventListener("click", tick);
+$("limpar").addEventListener("click", ()=>{ $("log").textContent = ""; bruto = ""; });
+
+function boot(){
+  if(timer) return;
+  tick();
+  timer = setInterval(tick, 1500);
+}
+window.addEventListener("pywebviewready", boot);
+if(window.pywebview && window.pywebview.api) boot(); else setTimeout(boot, 1500);
+</script>
+</body>
+</html>
