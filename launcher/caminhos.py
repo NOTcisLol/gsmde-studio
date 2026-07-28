@@ -31,6 +31,23 @@ from pathlib import Path
 LAUNCHER = Path(__file__).resolve().parent
 PREFS = LAUNCHER / "prefs.json"
 
+# RAIZ UNICA (2026-07-28). Tudo do GSMDE mora sob uma arvore so; antes estava
+# espalhado por D:\Trainer_v13, D:\Trainer_outputs, D:\gsmde-studio e G:\SD.NEXT,
+# e mover um disco exigia editar ~90 arquivos. Aqui a ancora e' UMA:
+#   GSMDE_ROOT (env)  ->  senao, sobe do proprio arquivo ate achar a marca
+# A biblioteca de MODELOS fica de fora de proposito: ela e' compartilhada com o
+# SD.Next e segue no padrao dele (D:\Models).
+def _acha_raiz() -> Path:
+    if os.environ.get("GSMDE_ROOT"):
+        return Path(os.environ["GSMDE_ROOT"])
+    for p in [LAUNCHER, *LAUNCHER.parents]:        # studio/launcher -> studio -> D:\GSMDE
+        if (p / "ckpts").is_dir() and (p / "trainer").is_dir():
+            return p
+    return Path(r"D:\GSMDE")                        # ultimo recurso
+
+
+RAIZ = _acha_raiz()
+
 # subpastas que caracterizam uma raiz de modelos no padrao SD.Next/ComfyUI.
 # Quanto mais dessas existirem, mais provavel que a pasta seja a raiz certa.
 MARCAS = ["Stable-diffusion", "Lora", "VAE", "embeddings", "controlnet",
@@ -54,18 +71,22 @@ ESQUEMA = {
 
 PADROES = {
     "modelos_raiz": [r"D:\Models", r"G:\Models", r"C:\Models"],
-    "base": [r"G:\Models\Stable-diffusion\IDN_Illustrious_V10_B.safetensors",
-             r"D:\Models\Stable-diffusion\IDN_Illustrious_V10_B.safetensors"],
-    # ORDEM IMPORTA: o canonico primeiro. A copia em G: continua no disco e,
-    # estando antes, sequestrava a resolucao inteira.
+    # ORDEM IMPORTA (§8): o canonico primeiro. Um caminho morto na frente da lista
+    # nao da erro — so faz o app ler o lugar errado calado.
+    "base": [r"D:\Models\Stable-diffusion\IDN_Illustrious_V10_B.safetensors",
+             r"G:\Models\Stable-diffusion\IDN_Illustrious_V10_B.safetensors"],
+    # A copia velha em G:\Trainer_v13 foi APAGADA na unificacao de 2026-07-28;
+    # tirada da lista para nao ressuscitar como fallback silencioso.
     "especialistas": [r"D:\Models\gsmde\specialists",
-                      r"G:\Trainer_v13\models\specialists",
-                      r"D:\Trainer_v13\models\specialists"],
-    "centros_hf": [r"D:\Trainer_v13\centros_hf"],
-    "centros_civitai": [r"D:\Trainer_v13\centros_civitai"],
-    "saidas": [str(LAUNCHER.parent / "outputs" / "gsmde")],
-    "saidas_intermed": [str(LAUNCHER.parent / "outputs" / "gsmde" / "intermed")],
-    "treino_saidas": [r"D:\Trainer_outputs"],
+                      str(RAIZ / "ckpts" / "models" / "specialists")],
+    "centros_hf": [str(RAIZ / "trainer" / "centros_hf")],
+    "centros_civitai": [str(RAIZ / "trainer" / "centros_civitai")],
+    # AS IMAGENS FICAM NO G: DE PROPOSITO (decisao do usuario, 2026-07-28): G: e'
+    # NVMe (gravacao mais rapida que o D:, que e' SATA) e mantem as saidas visiveis
+    # junto das do SD.Next. Unificar o CODIGO nao implica unificar as SAIDAS.
+    "saidas": [r"G:\SD.NEXT\outputs\gsmde"],
+    "saidas_intermed": [r"G:\SD.NEXT\outputs\gsmde\intermed"],
+    "treino_saidas": [str(RAIZ / "outputs" / "treino")],
 }
 
 ENV = {"base": "GSMDE_BASE", "especialistas": "GSMDE_SPEC",

@@ -32,44 +32,73 @@ tabela de "placa X prefere dtype Y" preveria isso — é propriedade do build.
 
 ## 3. Onde cada coisa vive
 
+**Unificado em 2026-07-28.** Antes o projeto estava espalhado por quatro raízes
+(`D:\Trainer_v13`, `D:\Trainer_outputs`, `D:\gsmde-studio`, `G:\SD.NEXT`) e trocar
+um disco exigia editar ~90 arquivos. Agora a âncora é **uma**: `GSMDE_ROOT`
+(variável de ambiente) ou a detecção que sobe do próprio arquivo até achar
+`ckpts/` + `trainer/`. Ver `launcher/caminhos.py`.
+
 | o quê | onde |
 |---|---|
-| repositório publicado | `D:\gsmde-studio` → github.com/NOTcisLol/gsmde-studio |
-| motor + pipeline de treino | `D:\Trainer_v13` (**não é repo git ainda**) |
+| **raiz de tudo** | `D:\GSMDE` |
+| repositório publicado | `D:\GSMDE\studio` → github.com/NOTcisLol/gsmde-studio |
+| motor + pipeline de treino | `D:\GSMDE\trainer` (**não é repo git ainda**) |
+| estado de treino (`ckpt.pt`) | `D:\GSMDE\ckpts\models` (35 ckpts — c7 retoma daqui) |
+| UI do Studio | `D:\GSMDE\ui` |
+| banner / ícones | `D:\GSMDE\assets` |
 | launcher pessoal (dev) | `G:\SD.NEXT\launcher` (mistura SD.Next — **não publicar**) |
+| atalho de inicialização | `G:\SD.NEXT\GSMDE.bat` |
 | centros treinados | `D:\Models\gsmde\specialists` (36 centros, 16,9 GB) |
 | LoRAs da biblioteca | `D:\Models\Lora` (389 arquivos) |
-| saídas de treino | `D:\Trainer_outputs` |
+| saídas de treino | `D:\GSMDE\outputs\treino` |
+| **imagens geradas** | `G:\SD.NEXT\outputs\gsmde` |
 
-`D:\gsmde-studio` é uma **cópia** dos arquivos, não um link. Ao editar em
-`D:\Trainer_v13\forks` ou `G:\SD.NEXT\launcher`, é preciso copiar de novo para o
+Duas coisas ficam **fora** da raiz de propósito:
+
+- **`D:\Models`** — a biblioteca é compartilhada com o SD.Next e segue o padrão
+  dele. Unificar o código não implica mover 569 GB de pesos.
+- **`G:\SD.NEXT\outputs\gsmde`** — G: é NVMe (D: é SATA): gravar imagem ali é mais
+  rápido, e as saídas ficam visíveis junto das do SD.Next.
+
+Os locais antigos foram renomeados para `_OLD_*` em vez de apagados: se algum
+caminho escapou do refactor, ele **falha alto** em vez de ler dado obsoleto em
+silêncio (a armadilha da §8). `G:\_OLD_Trainer_v13` são 42,7 GB de estado de treino
+velho — 30 centros, todos já no canônico, todos os `ckpt.pt` mais antigos que os de
+`D:\GSMDE\ckpts`. Pode apagar.
+
+`D:\GSMDE\studio` é uma **cópia** dos arquivos, não um link. Ao editar em
+`D:\GSMDE\trainer\forks` ou `G:\SD.NEXT\launcher`, é preciso copiar de novo para o
 repo antes de commitar. Isso é dívida técnica conhecida.
 
 ## 4. Estado da publicação
 
 | destino | estado |
 |---|---|
-| **GitHub** | ✅ `5d70cd1`, 33 arquivos, 9.253 linhas. Público. |
-| **HuggingFace** | 🟡 repo `CairoAOGG4/gsmde-centros` criado e vazio (2 arquivos auto). Upload dos 16 GB **não feito**. |
-| **Space de demo** | ⬜ não começado — depende do upload acima |
-| **Artigo CivitAI** | ⬜ não começado — é o último, aponta para os dois anteriores |
+| **GitHub** | ✅ github.com/NOTcisLol/gsmde-studio — público |
+| **HuggingFace** | ✅ huggingface.co/CairoAOGG4/gsmde-centros — 36 centros, 74 arquivos, 16,9 GB (upload em 1h15) |
+| **Artigo CivitAI** | 🟡 texto pronto em `docs/artigo_civitai.md`, **não publicado** |
+| **Space de demo** | ⬜ não começado |
 
 Identidades: git `connectcairo@gmail.com` / `NOTcisLol`; HF `CairoAOGG4`.
 
-### O comando do upload que falta
+No repo da HF estão os pesos, o model card e o `brain_registry.public.json`
+(registro sem caminhos absolutos). Os `ckpt.pt`/`latents.pt` ficaram de fora —
+519 MB de estado de treino que não geram nada.
 
-O `--include` do typer é **flag repetida**, não valores separados por espaço —
-errei isso duas vezes. Mais simples listar o que fica de fora:
+**Título sugerido para o artigo:** "GSMDE: a arquitetura de difusão para placas
+fracas". O ângulo escolhido para o CivitAI é o **scan & adapt** — não existe
+"modelo GSMDE" para baixar, mas todo LoRA SDXL já é um centro em potencial.
 
-```powershell
-& "G:\SD.NEXT\sdnext\venv\Scripts\hf.exe" upload-large-folder CairoAOGG4/gsmde-centros "D:\Models\gsmde\specialists" --repo-type model --exclude "*.pt" --exclude "logs/*" --exclude "brain_registry.json"
-```
+### Armadilhas de publicação (custaram tempo)
 
-`upload-large-folder` (e não `upload`) porque retoma se cair — são 16 GB.
-
-**Já preparados, prontos para subir:**
-- `D:\Models\gsmde\specialists\README.md` — model card com tabela dos 36 centros
-- `D:\Models\gsmde\specialists\brain_registry.public.json` — registro sem caminhos absolutos
+- O `--include` do typer é **flag repetida**, não valores separados por espaço.
+  Mais simples usar `--exclude`.
+- `hf auth login` **sem `--force`** não substitui um token já guardado: responde
+  "already logged in" e o token novo nunca entra. Sintoma: 401 em tudo.
+- `hf repo` virou `hf repos`.
+- Criar o repo no GitHub **com** README/license gera um commit inicial e o push
+  local é recusado por não ter ancestral comum.
+- PowerShell 5.1 não tem `&&` — use `;`.
 
 **Nunca versionar:** `control.token`, `civitai_auth.bin` (token OAuth cifrado),
 `prefs.json`, e `broad_specialists_local.json` (lista os 389 LoRAs pessoais).
@@ -87,7 +116,7 @@ O treino está **pausado** (supervisor e fila encerrados para testes). `unhas` t
 checkpoint no step 250 e retoma de lá.
 
 ```powershell
-Start-Process powershell -ArgumentList '-NoExit','-File','D:\Trainer_v13\supervisor_clusters.ps1' -WindowStyle Minimized
+Start-Process powershell -ArgumentList '-NoExit','-File','D:\GSMDE\trainer\supervisor_clusters.ps1' -WindowStyle Minimized
 ```
 
 O supervisor encadeia c6→c7 e ressuscita a fila se ela cair. **Mate o supervisor
@@ -125,6 +154,7 @@ aquecimento, a convergência nunca roda; o trainer avisa. Detalhes em
 | treino | **1,68 s/step**, ~100 min por centro |
 | centros | mediana **0,56 GB** · LoRAs da biblioteca 0,14 GB |
 | tamanho do UNet SDXL | 2,57 B params, 5,14 GB |
+| paginação, 5 centros | módulo a módulo 1,376 s/passo → **bloco contíguo 0,174** (7,9x) |
 
 **fp16 domina bf16 nos dois eixos** (mais rápido E mais preciso — bf16 tem 7 bits
 de mantissa contra 10). O padrão da CPU foi trocado de bf16 para fp16.
@@ -182,6 +212,22 @@ tempo. Medido 8,8x mais rápido que a CPU, sem OOM em 8 GB.
 **Scan & adapt** — qualquer LoRA SDXL vira centro se tiver tags legíveis. 61% da
 biblioteca local qualifica.
 
+**Paginação por bloco contíguo** (2026-07-26, tarde) — os pesos de cada centro
+viram **um tensor plano em memória pinada**, e os parâmetros são *views* dentro
+dele. Paginar passou a ser uma cópia por centro em vez de uma por módulo: com 7
+centros, de 7.840 transferências por passo para 7.
+
+Medido: **1,376 → 0,174 s/passo** com 5 centros (7,9x). Numa geração de 25
+passos, 34 s → 4 s só de paginação.
+
+Quatro pontos de movimentação foram roteados pelo bloco, não só o `_page`: o
+`_politica_vram` também move nichos direto, e um `.to()` por módulo apontaria os
+parâmetros para fora do buffer, deixando as views órfãs. Fallback para o caminho
+antigo se um centro tiver dtypes misturados.
+
+Verificado com `allclose` que os pesos sobrevivem à ida e volta — se as views
+desalinhassem, o modelo geraria lixo **sem dar erro**.
+
 ## 8. Armadilhas que custaram tempo (não repetir)
 
 **Validar JS contando chaves não é validar sintaxe.** Reportei "OK" várias vezes
@@ -214,6 +260,27 @@ segue. Um LoRA de terceiro não pode derrubar a rodada.
 **`load_lora_weights` chama o carregador do text encoder mesmo sem chaves de TE**,
 e o `rank_dict` vazio estoura `IndexError`. Use `unet.load_lora_adapter()`.
 
+**`hipErrorLaunchFailure` sob paginação módulo a módulo — RESOLVIDO.** A GPU
+travava (o próprio Gerenciador de Tarefas parava de renderizar) e o erro saía
+como *unspecified launch failure* num `conv2d` qualquer — assíncrono, então o
+lugar do rastro não era o lugar da falha.
+
+Causa confirmada, não hipótese: ao tentar reproduzir num benchmark, o caminho
+antigo deu `hipErrorOutOfMemory` movendo 7 centros módulo a módulo. As cópias
+assíncronas se acumulam mais rápido do que são liberadas. Em produção o driver
+nem chegava a reportar OOM limpo — devolvia launch failure e travava.
+
+Sintoma associado: **9,5 GB de memória compartilhada** com apenas 4,87 GB
+alocados pelo torch. Não éramos nós inflando; era o WDDM reagindo à fragmentação
+causada pela enxurrada de alocações pequenas.
+
+E explicava os **86% do tempo em `yield_gpu`** que o `[perf]` reportava: o
+`synchronize()` esperava uma fila de milhares de cópias minúsculas drenar.
+
+**Depois de um `hipErrorLaunchFailure` o contexto HIP é irrecuperável.** O worker
+captura o traceback e segue no laço, mas toda chamada seguinte falha — ele fica
+segurando VRAM e RAM sem gerar nada. Mate o processo antes de tentar de novo.
+
 ## 9. Pendências, por ordem de valor
 
 1. **Terminar o upload da HF** (comando na seção 4) — destrava Space e artigo
@@ -229,10 +296,18 @@ e o `rank_dict` vazio estoura `IndexError`. Use `unet.load_lora_adapter()`.
 8. **Aba de benchmark** com compartilhamento de resultados por hardware —
    `bench_te.py` já grava JSON agregável. Precisa ser **opt-in**: o JSON
    identifica a máquina.
-9. **Validar o i2i** em imagem de alta resolução — nunca foi testado de verdade
+9. **Medir o ganho da paginação por bloco numa geração completa.** O 7,9x é
+   da paginação isolada; quanto isso melhora o total depende de que fração do
+   tempo era paginação. Procurar no log a linha
+   `[gsmde] blocos contiguos: N centros ... 1 transferencia por centro`
+9b. **Validar o i2i** em imagem de alta resolução — nunca foi testado de verdade
 10. **Sobreposição de transferência** (duplo buffer): copiar o centro *i+1*
-    enquanto o *i* calcula. Requer memória pinada e streams paralelas — medir o
-    teto antes de implementar
+    enquanto o *i* calcula. Ficou mais viável depois da paginação por bloco — os
+    pesos já estão em memória pinada, que era um dos dois pré-requisitos. Falta
+    confirmar se o ROCm/Windows honra stream de cópia paralela (o contador
+    `Copy` nunca mostrou atividade nesta placa). **Medir o teto antes**: a
+    paginação caiu de 34 s para 4 s numa geração de 25 passos, então o que
+    sobra para esconder é bem menor do que era
 11. **madeira** (1.588 imgs, abaixo do piso de 2.000) e **texto** (precisa de
     LoRA teacher) seguem sem centro
 12. Atualizar **github.com/NOTcisLol/IDK-Trainer** com o pipeline de treino
@@ -240,8 +315,14 @@ e o `rank_dict` vazio estoura `IndexError`. Use `unet.load_lora_adapter()`.
 ## 10. Decisões de projeto (não reverter sem motivo)
 
 - **i2i não é re-noise.** Halo de três camadas: externa = contexto, média =
-  blending, núcleo = geração do zero. Sem tiling e sem supersampling — reescalar
-  só a região mascarada cria descasamento de ruído ("photoshop mal feito").
+  blending, núcleo = geração do zero.
+- **Supersampling: liberado (revisto em 2026-07-28).** A regra antiga era "sem
+  tiling e sem supersampling", pelo receio de que reescalar só a região mascarada
+  criasse descasamento de ruído ("photoshop mal feito"). O receio era *a priori*;
+  testes exaustivos no ultra depois disso mostraram que a costura **aguenta sem
+  gerar artefato**. Fazer upscale da região antes de gerar dá ao modelo mais pixels
+  para trabalhar e ele **alucina menos**. Vale para o caminho do detailer
+  (YOLO define a máscara → `ultra_halo` regenera com padding + halo).
 - **Quatro contextos no i2i**: global (IP-Adapter), vizinho (halo), costura
   (feather) e prompt.
 - **O agendamento mora no CivitAI**, não aqui. Nada de agendador local: o PC pode

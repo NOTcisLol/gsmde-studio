@@ -110,7 +110,7 @@ def main():
     ap.add_argument("--base", default=BASE_PADRAO)
     ap.add_argument("--centros", type=int, default=6)
     ap.add_argument("--repete", type=int, default=2)
-    ap.add_argument("--saida", default=r"D:\Trainer_v13\config\te_bench.json")
+    ap.add_argument("--saida", default=r"D:\GSMDE\trainer\config\te_bench.json")
     a = ap.parse_args()
     if not a.base:
         raise SystemExit("nao achei o checkpoint base; passe --base")

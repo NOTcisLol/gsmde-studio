@@ -157,7 +157,7 @@ def confere_ram(etapa="", extra_gb=0.0):
 # Pastas de centros BAIXADOS (HF/CivitAI/biblioteca local). Cada ficha em
 # specialists_<origem>/<nome>.json aponta o .safetensors com "arquivo" —
 # diferente dos treinados aqui, que seguem o padrao <SPEC>/<nome>/specialist.
-FICHAS_EXTERNAS = [Path(r"D:\Trainer_v13") / f"specialists_{o}"
+FICHAS_EXTERNAS = [Path(r"D:\GSMDE\trainer") / f"specialists_{o}"
                    for o in ("local", "hf", "civitai")]
 _CACHE_EXTERNO: dict = {}
 
