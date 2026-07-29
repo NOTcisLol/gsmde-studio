@@ -163,6 +163,67 @@ Na GPU as três precisões custam ~1 s: **ali não há motivo para baixar precis
 Resposta à pergunta "numa H100 justifica?" — não, o ganho é de décimos de segundo
 numa fase que roda uma vez.
 
+## 6b. Pipeline de alta resolução (medido em 2026-07-28)
+
+**O hires em camadas era o culpado do spill, não a resolução.** Ele processa a
+imagem INTEIRA de uma vez; o ultra tiled processa pedaços, e o tile limita a VRAM
+pela própria dimensão — a resolução final deixa de importar.
+
+Trocando `gen → hires → ultra` por **`gen 768 → ultra_halo` (sem hires)**:
+
+| | resolução | tempo | folga de VRAM |
+|---|---|---|---|
+| caminho antigo, 1280x720 | 0,92 MP | 84 s/it (**spill**) | 6% |
+| gen → ultra x3.0 core384 | **2074x2074 = 4,3 MP** | **5,1 min** | 0,75-0,88 GB, sem spill |
+
+Quase 5x a área, sem derramar, com o teacher **inteiro** (4,78 GB) — não é preciso
+backbone reduzido para chegar lá. O pipeline antigo com ultra levava mais de uma
+hora por imagem.
+
+**O prompt do tile tem de ser SÓ TIPO DE DETALHE.** Passar o prompt do assunto
+(`1girl, cat ears, green dress...`) faz cada tile de fundo obedecer e desenhar uma
+personagem em miniatura — a imagem enche de cópias pequenas. Tiles menores
+**pioram** (mais pedaços recebendo a mesma ordem). Use algo como `masterpiece,
+best quality, highly detailed, intricate details, fine textures, sharp focus`. O
+conteúdo já existe na imagem; denoise 0.35 preserva.
+
+Parâmetros validados: `scale=3.0, core=384, pad=64, overlap=80, denoise=0.35,
+steps=26`. Regra do usuário: **steps ≥ 25 e denoise ≤ 0.35**, senão a imagem derrete.
+
+## 6c. Redução do backbone — mapa medido, investigação arquivada
+
+Investigado a fundo e **arquivado**: o pipeline tiled já resolve a resolução, então
+destilar deixou de ser prioridade. O mapa fica registrado para quando fizer sentido.
+
+Os centros são **LoRA rank 256** (`to_q/k/v/out`, 1120 chaves), logo o backbone é
+matematicamente obrigatório (`W' = W + B@A` não existe sem `W`). E ele é a
+**deduplicação**, não o custo: sem ele o substrato compartilhado seria copiado 36
+vezes (~30 GB hoje contra ~144 GB de especialistas independentes).
+
+Repartição do UNet: **FFN 47,9%** (os centros não tocam) · atenção 37,2% (onde eles
+vivem) · resnets 12,8%.
+
+| corte | GB | s/passo | qualidade (sem treino) |
+|---|---|---|---|
+| teacher | 4,78 | 1,17 | referência |
+| FFN ff2.0 | 3,64 | 0,42 | boa |
+| **blocos 6/10** | **3,23** | **0,38** | **boa — melhor por GB** |
+| 8/10 + ff2.0 | 3,08 | 0,36 | degradada (os estragos **somam**) |
+| blocos 4/10 | 2,45 | 0,32 | quebrada |
+
+Cortar a FFN preserva 100% dos LoRAs. E os centros aguentam **perder 57% das
+chaves** sem degradar (`up_blocks.0` + `mid_block` zerados): são redundantes entre
+blocos — foi isso que liberou remover blocos inteiros.
+
+O podado 6/10 faz o mesmo 2074x2074 em 2,5 min (2,2x mais rápido) **mas perde o
+fundo** (vila e ponte viram bokeh). Serve como modo **rápido** para iterar prompt,
+não como padrão.
+
+**Erro metodológico registrado:** medir "o centro ainda age?" por distância de
+pixel **não funciona**. Deu ~100% para todos os cenários, inclusive nos pares
+parcial-vs-completo — a difusão em seed fixa é caótica, então qualquer perturbação
+gera outra imagem. Precisa ser CLIP ou inspeção visual.
+
 ## 7. Construído nesta sessão
 
 **Clusters c6/c7** — `build_cluster6.py`, `build_cluster7.py`. Amostragem
