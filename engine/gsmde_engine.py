@@ -900,10 +900,37 @@ class GSMDE:
         # esgotar a VRAM NAO da `hipErrorOutOfMemory`, da `unspecified launch
         # failure` — o mesmo sintoma de um kernel quebrado. Isso mandou a
         # investigacao para o AOTRITON e para a paginacao antes de chegar aqui.
+        # A BASE ERA UM CHUTE DE PIOR CASO, E COMIA O ORCAMENTO INTEIRO.
+        #
+        # `max(2.5, 0.30*total)` da 2,5 GB numa placa de 8. So que as ativacoes
+        # foram MEDIDAS (2026-07-28): ~0,49 GB a 589.824 px, com o pico real da
+        # geracao subindo pouco alem disso. Reservar 2,5 para gastar 0,5 jogava
+        # fora 2 GB de folga.
+        #
+        # O efeito era invisivel ate o backbone encolher: com o teacher nao sobrava
+        # nada mesmo, entao a constante nunca era o gargalo. Com o backbone podado
+        # havia 2,51 GB livres e a politica ainda decidiu "0 de 10 nichos
+        # residentes" — porque 2,51 - 2,50 = 0,01. Nao faltava memoria; faltava a
+        # politica enxergar a memoria que existia.
+        #
+        # Agora a base sai da MEDIDA com margem de seguranca, nao do medo. O piso
+        # existe para o caso de a medicao nao valer (build diferente, resolucao
+        # muito pequena): abaixo dele nao se economiza nada util mesmo.
         AREA_REF = 768 * 768
+        ATIV_REF_GB = 0.49                    # medido nesta maquina, a AREA_REF
+        MARGEM = 1.6                          # 60% sobre o medido
+        PISO_GB = 0.8
         area = getattr(self, "_area_alvo", AREA_REF) or AREA_REF
-        base = float(reserva_gb or 0) or max(2.5, 0.30 * total)
-        reserva = base * max(1.0, area / AREA_REF)
+        escala = max(1.0, area / AREA_REF)
+        if reserva_gb:                        # pedido explicito ganha da medida
+            reserva = float(reserva_gb) * escala
+        else:
+            reserva = max(PISO_GB, ATIV_REF_GB * MARGEM * escala)
+        # TETO DE OCUPACAO (escolha do usuario: 95%). No Windows o WDDM derrama em
+        # vez de travar, entao a folga pode ser menor que num Linux — mas alguma
+        # folga tem de sobrar, senao cada pouso de centro despeja algo.
+        teto = 0.95 * total
+        reserva = max(reserva, total - teto)
 
         def _bytes(o):
             # self.paged guarda os MODULOS lora_A/lora_B (nn.Linear), nao tensores:
