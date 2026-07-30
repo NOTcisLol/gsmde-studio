@@ -3,6 +3,9 @@
 **Graph-Structured Mixture of Denoising Experts** — difusão modular por especialistas,
 com roteamento semântico e paginação de centros, rodando em placa de 8 GB.
 
+[![Doe via Mercado Pago](https://img.shields.io/badge/Doar-Mercado%20Pago-00b1ea?style=for-the-badge&logo=mercadopago&logoColor=white)](https://link.mercadopago.com.br/donatedev)
+
+
 Em vez de um UNet monolítico que carrega tudo a cada passo, o GSMDE mantém uma
 prateleira de **centros** (LoRAs especialistas), lê o prompt, decide quais são
 relevantes e sobe só esses para a placa. O codificador de texto atua como
