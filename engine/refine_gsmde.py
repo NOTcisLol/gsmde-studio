@@ -250,6 +250,30 @@ def classe_do_alvo(kind: str) -> str:
     return k
 
 
+# Centro que atende cada classe no modo AUTOMATICO. Sao os que a bancada de 17/08
+# exercitou de fato — 'person' e 'maos' foram treinados no projeto; de olhos nao ha
+# centro treinado, entao entra o da biblioteca. Ordem = preferencia: o primeiro que
+# existir na instalacao ganha.
+CENTRO_AUTO = {
+    "rosto": ["person", "pele", "expression"],
+    "olho": ["detailedeyes_v3", "enchantingeyesillustrious", "loraeyes_v1"],
+    "mao": ["maos", "hands_v2_1"],
+    "pessoa": ["person", "pose"],
+}
+
+
+def centro_automatico(kind: str, disponiveis=None) -> str | None:
+    """Melhor centro para este alvo, ou None se nenhum candidato existir.
+
+    None NAO e' erro: significa 'refaz a regiao com os centros que ja estao na
+    cena', que e' o comportamento historico do detailer.
+    """
+    for c in CENTRO_AUTO.get(classe_do_alvo(kind), []):
+        if disponiveis is None or c in disponiveis:
+            return c
+    return None
+
+
 def _forma_ok(cx, regra):
     x0, y0, x1, y1 = cx
     w, h = x1 - x0, y1 - y0
@@ -332,8 +356,18 @@ def _mascara(caixas, tam, desloc=(0, 0), escala=1.0):
 
 def detail(eng: GSMDE, img: Image.Image, kinds, conf=0.35, denoise=0.35,
            steps=20, crop=768, pad=0.30, seed=1234, lado_min=256,
-           mascarado=True, par=True) -> Image.Image:
+           mascarado=True, par=True, centros=None) -> Image.Image:
     """YOLO detecta -> agrupa -> i2i MASCARADO no recorte ampliado -> costura.
+
+    centros: {alvo: nome_do_centro | "auto" | "" }. Este e' o GSMDE trabalhando
+        como detailer de fato: cada regiao e' refeita pelo ESPECIALISTA dela, e
+        nao pelos centros que por acaso ficaram carregados da cena inteira.
+        "auto" resolve pela tabela CENTRO_AUTO (rosto->person, olho->
+        detailedeyes_v3, mao->maos), "" ou ausente mantem os centros da cena.
+
+        O centro precisa ja estar carregado no motor: trocar `eng.regional` so
+        escolhe entre os adaptadores que existem, nao carrega peso novo. Pedir um
+        centro ausente cai no comportamento da cena, com aviso.
 
     mascarado=False volta ao comportamento antigo (recorte inteiro redesenhado),
     para comparacao — nao para uso.
@@ -345,6 +379,10 @@ def detail(eng: GSMDE, img: Image.Image, kinds, conf=0.35, denoise=0.35,
     res = img.copy()
     W, H = res.size
     achadas = {}
+    centros = centros or {}
+    # os adaptadores que o motor tem: so' entre estes da' para escolher
+    carregados = set(getattr(eng, "paged", {}) or {})
+    reg_cena = list(eng.regional)
     for kind in kinds:
         mp = yolo_path(kind)
         if not mp:
@@ -401,6 +439,23 @@ def detail(eng: GSMDE, img: Image.Image, kinds, conf=0.35, denoise=0.35,
         print(f"[detailer] {kind} ({cls}): {len(cru)} bruta(s), {fora} descartada(s), "
               f"{len(bons)} valida(s) em {len(grupos)} passada(s)", flush=True)
 
+        # ---- centro deste alvo ------------------------------------------------
+        pedido = str(centros.get(kind) or centros.get(cls) or "").strip()
+        alvo_centro = None
+        if pedido == "auto":
+            alvo_centro = centro_automatico(kind, carregados or None)
+            if not alvo_centro:
+                print(f"[detailer] {kind}: sem centro automatico disponivel "
+                      f"-> usa os centros da cena", flush=True)
+        elif pedido:
+            if pedido in carregados or not carregados:
+                alvo_centro = pedido
+            else:
+                print(f"[detailer] {kind}: centro '{pedido}' nao esta carregado "
+                      f"-> usa os centros da cena", flush=True)
+        if alvo_centro:
+            print(f"[detailer] {kind}: centro '{alvo_centro}'", flush=True)
+
         for uniao, membros in grupos:
             cxa = _recorte(uniao, W, H, pad, lado_min)
             ow = cxa[2] - cxa[0]
@@ -419,8 +474,26 @@ def detail(eng: GSMDE, img: Image.Image, kinds, conf=0.35, denoise=0.35,
                                np.float32) / 255.0
                 ).to(eng.dev, torch.float16)[None, None]
                 kw["lat_ctx"] = eng.encode_image(peca)
-            nova = eng.denoise(init=peca, steps=steps, seed=seed, strength=denoise,
-                               mask_every=8, **kw).resize((ow, ow), Image.LANCZOS)
+            # `try/finally`: se a passada estourar, a cena NAO pode continuar com
+            # o centro do detailer no lugar dos dela — as etapas seguintes
+            # (hires, ultra) sairiam com o especialista errado, sem erro visivel.
+            masc_cena = getattr(eng, "usar_mascaras", True)
+            if alvo_centro:
+                eng.regional = [(alvo_centro, [])]
+                # Sonda DESLIGADA: ela procura as ancoras de texto do centro no
+                # prompt, e `set_prompt` foi chamado para os centros da CENA, nao
+                # para este. Alem disso o recorte JA E' o territorio — nao ha o
+                # que disputar —, e pular a sonda tira uma passada de UNet por
+                # passo (2 em vez de 3).
+                eng.usar_mascaras = False
+            try:
+                nova = eng.denoise(init=peca, steps=steps, seed=seed,
+                                   strength=denoise, mask_every=8,
+                                   **kw).resize((ow, ow), Image.LANCZOS)
+            finally:
+                if alvo_centro:
+                    eng.regional = reg_cena
+                    eng.usar_mascaras = masc_cena
             cheio = res.copy()
             cheio.paste(nova, (cxa[0], cxa[1]))
             res = Image.composite(cheio, res, _mascara(membros, res.size))

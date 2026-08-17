@@ -178,6 +178,46 @@ function strCamadas(){
 }
 
 /* ================= detailer: um prompt POR ALVO ================= */
+
+/* Mesma tabela do motor (refine_gsmde.CENTRO_AUTO). Duplicada aqui SO' para o
+   rótulo do "automático" dizer qual centro vai entrar — quem decide de verdade é
+   o motor. Se divergirem, o rótulo mente mas a geração continua certa. */
+const DET_AUTO = {
+  rosto: ["person","pele","expression"],
+  olho:  ["detailedeyes_v3","enchantingeyesillustrious","loraeyes_v1"],
+  mao:   ["maos","hands_v2_1"],
+  pessoa:["person","pose"],
+};
+const DET_CLASSES = [
+  ["olho",  ["eye","olho","iris"]],
+  ["rosto", ["face","rosto","head","cabeca"]],
+  ["mao",   ["hand","mao","maos"]],
+  ["pessoa",["person","pessoa","body"]],
+];
+function classeAlvo(model){
+  const k = String(model||"").toLowerCase();
+  for(const [nome, chaves] of DET_CLASSES) if(chaves.some(c=>k.includes(c))) return nome;
+  return "";
+}
+function centroAuto(model){
+  const cands = DET_AUTO[classeAlvo(model)] || [];
+  return cands.find(c => CENTROS[c]) || "";
+}
+/* "automático" primeiro (é o validado), depois todos os centros carregados.
+   Um centro pedido que não exista faz o motor cair nos centros da cena com
+   aviso no log — não quebra a geração. */
+function opcoesCentro(sel, model){
+  const auto = centroAuto(model);
+  const cur = (sel === undefined) ? "auto" : sel;
+  const nomes = Object.keys(CENTROS).sort();
+  const rotAuto = auto ? `automático (${auto})` : "automático (nenhum disponível)";
+  let h = `<option value="auto"${cur==="auto"?" selected":""}>${esc(rotAuto)}</option>`;
+  h += `<option value=""${cur===""?" selected":""}>— usar os centros da cena —</option>`;
+  for(const n of nomes)
+    h += `<option value="${esc(n)}"${cur===n?" selected":""}>${esc(n)}</option>`;
+  return h;
+}
+
 function pintaDets(){
   const nome = (id)=> (YOLOS.find(y=>y.id===id) || {}).nome || id;
   $("detList").innerHTML = DETS.map((d,i)=>`
@@ -195,6 +235,8 @@ function pintaDets(){
         <div class="field"><div class="lbl">Passos</div>
           <input class="detSt" data-i="${i}" type="number" min="6" max="40" value="${d.st}"></div>
       </div>
+      <div class="field" data-help="detCentro"><div class="lbl">Especialista</div>
+        <select class="detC" data-i="${i}">${opcoesCentro(d.centro, d.model)}</select></div>
     </div>`).join("");
   $("detList").querySelectorAll(".detP").forEach(el=> el.addEventListener("input", ()=>{
     DETS[+el.dataset.i].prompt = el.value; }));
@@ -202,6 +244,8 @@ function pintaDets(){
     DETS[+el.dataset.i].dn = +el.value; }));
   $("detList").querySelectorAll(".detSt").forEach(el=> el.addEventListener("input", ()=>{
     DETS[+el.dataset.i].st = +el.value; }));
+  $("detList").querySelectorAll(".detC").forEach(el=> el.addEventListener("change", ()=>{
+    DETS[+el.dataset.i].centro = el.value; }));
   $("detList").querySelectorAll(".detDel").forEach(el=> el.addEventListener("click", ()=>{
     DETS.splice(+el.dataset.i,1); pintaDets(); }));
 
@@ -698,7 +742,8 @@ function buildCfg(){
     offload_base:$("offloadBase").value, offload_teto:+$("offloadTeto").value||0,
     refinar:$("hires").checked, camadas:strCamadas(), upscaler:$("upscaler").value,
     detailers: DETS.map(d=>({model:d.model, prompt:d.prompt||"",
-                             denoise:d.dn, steps:d.st})),
+                             denoise:d.dn, steps:d.st,
+                             centro:(d.centro===undefined?"auto":d.centro)})),
     // Medido em 17/08: sem máscara com buracos o detailer redesenha o que não é
     // alvo (o nariz entre os olhos); sem a regra do par, repintar um olho só
     // deixa as duas íris de cores diferentes. Padrão ligado nos dois.
@@ -899,7 +944,10 @@ async function reciclar(){
   }
   $("hires").checked = !!d.camadas; syncHires();
   DETS = (d.detailers||[]).map(x=>({model:x.model, prompt:x.prompt||"",
-                                    dn:+x.denoise||0.3, st:+x.steps||20}));
+                                    dn:+x.denoise||0.3, st:+x.steps||20,
+                                    // preferência antiga não tinha o campo:
+                                    // "auto" é o padrão validado, não ""
+                                    centro:(x.centro===undefined?"auto":x.centro)}));
   pintaDets();
   // `!== undefined` e nao `||`: com `||`, desmarcar a caixa e salvar traria ela
   // de volta marcada na proxima sessao, porque false cairia no padrao.
@@ -1267,7 +1315,7 @@ async function boot(){
   });
   $("detAdd").addEventListener("change", ()=>{
     const m = $("detAdd").value; if(!m) return;
-    if(!DETS.some(d=>d.model===m)) DETS.push({model:m, prompt:"", dn:0.3, st:20});
+    if(!DETS.some(d=>d.model===m)) DETS.push({model:m, prompt:"", dn:0.3, st:20, centro:"auto"});
     $("detAdd").value = ""; pintaDets();
   });
 
