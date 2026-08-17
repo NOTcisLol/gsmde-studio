@@ -9,6 +9,32 @@ está marcado como dúvida. Não troque medição por heurística.
 
 ---
 
+---
+
+# Relatório da bancada — CONCLUÍDO em 2026-08-12
+
+54 medições (9 topologias × 3 cenas × com/sem LoRA), 1024×1024. Entregue em
+`D:/GSMDE/docs`: `relatorio.md`, `ambiente_e_metodo.md`, 11 gráficos em `graficos/`,
+`bench.jsonl`, `vram_historico.jsonl`, 54 imagens em `bench_imagens/`. Os documentos
+antigos (`artigo_civitai.md`, `protocolo_treino.md`) foram atualizados.
+
+**Achado principal:** a UNet **original é a única que despeja** (0,30 GB); todas as
+reduções ficam em 0,08 GB, o piso. A redução não é conforto — é o que tira a geração
+da zona de transbordo em 8 GB. A `d5u10` é 27% mais rápida e usa 1 GB a menos.
+
+**Onde o corte custa:** detalhe de material e objeto pequeno (`down_blocks.2`). Em cena
+com pessoa, iguala ou supera a original — inclusive na cena feita para cobrar os 79%
+de compatibilidade.
+
+**Não descartar LoRA por causa da razão de vazamento.** A métrica é diferença média de
+pixel: confiável para vazamento (coluna "alheias"), fraca para efeito próprio. `mao`
+0,6× é provavelmente a métrica cega, não a LoRA morta.
+
+**Toda medição de VRAM anterior a 12/08/2026 é inválida** — lia o `snapshot.json` sem
+checar a idade, e ele estava parado havia 11,5 dias.
+
+---
+
 ## 1. O que é o GSMDE
 
 **Graph-Structured Mixture of Denoising Experts.** Em vez de um UNet monolítico,
@@ -395,3 +421,147 @@ segurando VRAM e RAM sem gerar nada. Mate o processo antes de tentar de novo.
   daria imagem pior sem explicação.
 - **Um centro por vez no treino**, uma imagem por passo, requeue por loss, sem
   épocas.
+
+---
+
+## Variantes de redução do backbone — como cada uma nasceu
+
+Escrito em **2026-08-08**. Todos os números saíram de execução nesta máquina.
+
+O objetivo é o mesmo desde o início: **caber nos 8 GB sem despejo**. A UNet do IDN
+ocupa 4,78 GB em fp16, e o despejo dessa ordem foi o que travou a máquina várias
+vezes — inclusive derrubando o driver para o genérico da Microsoft.
+
+Há **duas** estratégias implementadas, não três. O que parecia uma terceira era o
+parâmetro da primeira.
+
+### 1. Corte de camadas transformer  (`treina_backbone.py`, `cfg_student()`)
+
+Reduz `transformer_layers_per_block` do nível mais profundo. O teacher é `[1,2,10]`;
+o student em uso é `(1,2,6)`.
+
+O corte NÃO escolhe "up" ou "down": o terceiro valor é o nível de 1280 canais, que
+aparece em **três lugares ao mesmo tempo** — `down_blocks.2`, `mid_block` e
+`up_blocks.0`.
+
+| camadas | fp16 | redução | LoRAs encaixam |
+|---|---|---|---|
+| 10 (teacher) | 4,78 G | — | 560/560 (100%) |
+| 8 | 4,01 G | 16,2% | 464/560 (83%) |
+| 6 (o student) | 3,23 G | 32,5% | 368/560 (66%) |
+| 4 | 2,45 G | 48,7% | 272/560 (49%) |
+| 2 | 1,67 G | 65,0% | 176/560 (31%) |
+
+**Corte assimétrico é possível** via `reverse_transformer_layers_per_block`, e
+`down=10/up=6` tem exatamente o mesmo tamanho que `down=6/up=10` (2,150B, 4,01 GB) —
+mesma economia, capacidade em lados opostos da U.
+
+### 2. Encolhimento da FFN  (`destila_backbone.py`)
+
+Reduz só a rede feed-forward, medida em 47,9% dos pesos da UNet. **As formas da
+atenção ficam idênticas**, então LoRAs e centros encaixam por inteiro.
+
+| ff_mult | fp16 | redução | LoRAs |
+|---|---|---|---|
+| 4 (teacher) | 4,78 G | — | 100% |
+| 1.5 (o construído) | 3,35 G | 29,9% | **560/560 (100%)** |
+| 1.0 | 3,06 G | 35,9% | 100% |
+| 0.5 | 2,78 G | 41,9% | 100% |
+
+A FFN é truncada por **norma** — ficam as linhas de maior magnitude. Atenção,
+resnets e embeddings são copiados bit a bit do teacher.
+
+### 3. Corte ASSIMETRICO da descida — a estrategia escolhida (10/08/2026)
+
+`reverse_transformer_layers_per_block` permite cortar a descida e a subida em
+quantidades diferentes. Medido em 09-10/08 com heranca de pesos do teacher e **sem
+nenhuma destilacao**, as quatro LoRAs assadas a 0,25, mesmo prompt e mesma seed:
+
+| variante | params | fp16 | menor | LoRAs encaixam | imagem |
+|---|---|---|---|---|---|
+| teacher | 2,567 B | 4,78 G | — | 100% | referencia |
+| d6u10 | 2,150 B | 4,01 G | 16,2% | 83% | boa, indicador funde na xicara |
+| **d5u10 — ESCOLHIDA** | **2,046 B** | **3,81 G** | **20,3%** | **79%** | **boa** |
+| d4u10 | 1,942 B | 3,62 G | 24,4% | 74% | boa |
+| d3u10 | 1,838 B | 3,42 G | 28,4% | 70% | boa, maos limpas |
+| d2u10 | 1,733 B | 3,23 G | 32,5% | 66% | boa |
+| d1u10 | 1,629 B | 3,03 G | 36,5% | 61% | boa, maos limpas |
+
+**NENHUMA quebrou, nem a d1u10.** A descida aguentou o corte ate 1 camada. O ponto de
+deterioracao que se procurava nao existe dentro dessa faixa.
+
+**O que isso ensina:** o que destruia o corte simetrico (1,2,6) nao era perda de
+capacidade — era cortar a SUBIDA, onde o detalhe e' reconstruido. A descida so'
+codifica e tem folga enorme. O corte simetrico destilado por 20500 passos sai PIOR que
+qualquer assimetrica sem treino nenhum.
+
+**Escolha do usuario: d5u10.** Um pouco maior que o FFN 1.5 (3,81 contra 3,35 GB) mas
+com qualidade de imagem muito superior, e ~1 GB abaixo do teacher. **Todas as outras
+ficam no disco para teste posterior**, justamente porque nenhuma saiu quebrada.
+
+Arquivos: `D:/GSMDE/outputs/treino/students_cur/var_<nome>.pt` (8 variantes).
+Gerador: `D:/GSMDE/auto/varre_down.py` e `variantes_corte.py`.
+
+**RESSALVA NAO RESOLVIDA:** o quadro tem UMA seed e UM prompt — close de rosto com
+estante ao fundo, que quase nao convoca as LoRAs. O custo dos 79% de compatibilidade
+nao apareceu porque a cena nao pedia os temas. Antes de fixar a d5u10 em producao,
+repetir com prompt que chame material, cena e mao ao mesmo tempo.
+
+### A comparação que importa
+
+Corte a 6 camadas dá 32,5% de economia com 66% de compatibilidade; FFN a 1.5 dá
+29,9% com 100%. **Praticamente a mesma VRAM, e a FFN preserva a compatibilidade
+inteira.** Verificado na prática: 560 de 560 módulos presentes, zero formas erradas.
+
+### Onde os arquivos estão
+
+```
+D:/Models/gsmde/backbone_student/student_raw.pt                 FFN 1.5, herdado, NAO destilado
+D:/GSMDE/outputs/treino/students_cur/preservados/               corte (1,2,6), destilado ate 20500
+D:/GSMDE/outputs/treino/students_cur/var_*.pt                   variantes assimetricas (d10u6, d6u10, d8u8)
+D:/GSMDE/outputs/treino/students_cur/student_ffn_mesclado.pt    FFN + 4 LoRAs @ 0.25
+D:/GSMDE/outputs/treino/students_cur/student_corte_mesclado.pt  corte + 4 LoRAs @ 0.25
+```
+
+### O acidente que custou o melhor checkpoint
+
+O student de corte chegou a **loss 0,0061 no passo 19329** e gerava imagem boa. Ao
+retomar o treino ele caiu para 0,026 em 200 passos e estacionou. Causa: **o
+checkpoint nunca gravou o estado do Adafactor** — só `state_dict` e `cfg`. Cada
+retomada reinicia os segundos momentos.
+
+Somado a `--manter 3`, que podou os checkpoints antigos, e ao rastreio de "melhor"
+que reinicia por sessão e sobrescreveu `melhor.pt` com um pior, **os pesos de 19329
+se perderam**. Antes de retomar qualquer destilação, gravar o estado do otimizador.
+
+---
+
+# Bancada de 16–17/08/2026 — detailer, e quatro defeitos que a métrica não pegou
+
+Detalhes e números em `docs/detailer_e_ordem_de_carga.md`.
+
+**Centros como detailer funciona.** Gerar só com o backbone e refazer as regiões
+achadas por YOLO custa **300 s contra ~990 s** dos 6 centros no laço, com despejo
+de 0,42 contra 2,98 GB. A geração principal passa a ser 1 passada por passo.
+
+**A seed não determinava a imagem** — `pipe.scheduler.step()` não recebia
+`generator=`, então o ruído ancestral do EulerAncestral vinha do RNG global. Duas
+corridas iguais davam nitidez 346 e 201. Corrigido: diferença de 0 pixels.
+**Toda comparação A/B anterior a 17/08 carrega esse ruído.**
+
+**O despejo era na CARGA, não no laço.** `pipe.unet.to(dev)` arrasta os nichos
+pendurados na árvore: 4,78 + 3,81 = 8,59 GB de uma vez numa placa de 8. O laço
+sempre esteve limpo (0,10 GB). Desanexando antes de subir: 6,51 GB e 1,04 GB de
+despejo. Ainda não zerou — falta a janela do `aplica_offload_base`.
+
+**Carona custa MAIS que ser centro:** +54% de tempo para remover 2 passadas,
+porque cada passada passa a mover 3 blocos em vez de 1. Confirmar com 8 centros.
+
+**Regra do par:** nunca repintar um olho sozinho — sai uma íris azul e outra
+castanha. Medido nos dois sentidos (1 olho → diverge; 2 olhos numa passada →
+converge).
+
+**Método:** três vezes seguidas uma métrica de quantidade (diferença média de
+pixel, variância do laplaciano) foi usada para julgar identidade ou localização e
+errou. O que funciona é olhar a imagem e depois usar diff com componentes conexos
+para localizar a mudança e conferir se ela bate com o alvo.

@@ -387,8 +387,32 @@ function atualizaCusto(){
            + ` Os ${nCent - cabem} excedentes serão paginados: gera igual, mas cada um`
            + ` custa ~1 forward extra por passo.</div>`;
   }
+  // ---------------------------------------------------------------- CAMADAS
+  //
+  // A conta que explica por que o GSMDE demora mais que um modelo comum, e que
+  // ate' aqui o usuario nao tinha como fazer.
+  //
+  // Cada centro NAO e' uma LoRA empilhada no mesmo forward. Ele assume o UNet
+  // inteiro por vez e produz a propria predicao sobre todo o latente; so' depois
+  // as predicoes se combinam por mascara. Sao N passadas completas por passo, mais
+  // a sonda que extrai as mascaras e a passada do backbone.
+  //
+  // Medido em 13/08: paginacao 0 ms, set_adapters 39 ms, cessao 40 ms — as passadas
+  // respondem por ~98% do tempo. Entao o numero de camadas E' o custo.
+  const nPas = nCent ? nCent + 2 : 1;           // centros + sonda de mascara + base
+  const passos = +$("steps").value || 26;
+  const camadas = nCent
+    ? `<b>${nCent} centro${nCent===1?"":"s"} = ${nCent} camada${nCent===1?"":"s"} por passo</b>`
+      + ` <span class="dim">(+2: sonda de máscara e base)</span>`
+      + `<div class="custo-l dim">${passos} passos × ${nPas} = <b>${passos*nPas} passadas`
+      + ` completas do modelo</b> — um modelo comum faz ${passos*2} com CFG em lote.`
+      + ` É por isto que demora: <b>~${(nPas/2).toFixed(1)}× o trabalho</b>, não porque`
+      + ` esteja mal otimizado.</div>`
+    : `<i>depende dos centros que o prompt ativar</i>`;
+
   $("custo").innerHTML =
-    `<div class="custo-l">VRAM &nbsp;${vram}</div>`
+    `<div class="custo-l">CAMADAS &nbsp;${camadas}</div>`
+  + `<div class="custo-l">VRAM &nbsp;${vram}</div>`
   + `<div class="custo-l">RAM &nbsp;&nbsp;${ram}</div>`
   + alerta
   + `<div class="custo-l dim">os centros não ocupam VRAM residente — são paginados da RAM;`
@@ -404,6 +428,255 @@ function syncAuto(){
 function syncHires(){ $("hiresRows").style.display = $("hires").checked ? "" : "none"; }
 function syncUltra(){ $("ultraRows").style.display = $("ultra").checked ? "" : "none"; }
 
+/* ================= GALERIA DE LoRAs DA BIBLIOTECA ==========================
+
+   O PAPEL DE CADA UMA — carona ou centro — vem MEDIDO, nao suposto:
+
+     89 MB  como centro +7,16 s/it | como carona +3,62 s/it  (-49%)
+     709 MB como centro  ~7  s/it  | como carona  ~7   s/it  ( -0%)
+
+   Uma carona viaja DENTRO da passada de outro adaptador; um centro tem passada
+   propria do UNet. A carona nao e' gratuita porque roda em TODAS as passadas —
+   custa N x sobrecarga contra 1 passada inteira. Compensa enquanto for pequena.
+
+   Por isso a miniatura mostra o papel: e' a informacao que muda o tempo de
+   geracao, e o usuario decide vendo o custo, nao depois de esperar por ele.     */
+let CATALOGO = null;
+const LORAS_ESCOLHIDAS = new Map();   // id -> item
+
+async function carregaCatalogoLoras(){
+  if(CATALOGO) return CATALOGO;
+  // ESPERA A PONTE. Abrir o grupo antes de o pywebview inicializar caia num
+  // `return` silencioso, e como nao ha novo evento de toggle o painel ficava em
+  // "carregando..." para sempre. Agora espera, e se desistir DIZ que desistiu:
+  // um estado de carregamento eterno e' pior que um erro visivel.
+  for(let i = 0; i < 40 && !api(); i++) await new Promise(r=>setTimeout(r, 150));
+  if(!api()){
+    $("loraResumo").innerHTML = `<b class="warn">ponte com o Python indisponível</b>`;
+    return null;
+  }
+  try{
+    const r = await api().gsmde_catalogo_loras();
+    if(!r || r.__error__){
+      $("loraResumo").innerHTML = `<b class="warn">${esc((r&&r.__error__)||"catálogo vazio")}</b>`
+        + `<div class="dim">gere com: python D:/GSMDE/auto/gera_catalogo_loras.py</div>`;
+      return null;
+    }
+    if(!r.loras || !r.loras.length){
+      $("loraResumo").innerHTML = `<b class="warn">catálogo sem itens</b>`;
+      return null;
+    }
+    CATALOGO = r;
+    pintaGaleria();
+    return r;
+  }catch(e){
+    $("loraResumo").innerHTML = `<b class="warn">falhou: ${esc(e && e.message || e)}</b>`;
+    return null;
+  }
+}
+
+function pintaGaleria(){
+  if(!CATALOGO) return;
+  const q = ($("loraBusca").value||"").toLowerCase().trim();
+  const papel = $("loraPapel").value;
+  const compat = ($("loraCompat")||{value:"todos"}).value;
+  const todas = CATALOGO.loras || [];
+  const vis = todas.filter(l=>{
+    // 'ambos' aparece nos dois filtros: a faixa nao medida serve para os dois papeis
+    // "ambos" casa com qualquer papel pedido: a faixa nao medida serve aos dois
+    if(papel !== "todos" && l.papel !== papel && l.papel !== "ambos") return false;
+    if(compat !== "todos" && l.compat !== compat) return false;
+    if(!q) return true;
+    return (l.id+" "+(l.titulo||"")+" "+(l.dominio||[]).join(" ")).toLowerCase().includes(q);
+  });
+  $("loraResumo").innerHTML =
+      `<b>${vis.length}</b> de ${todas.length} mostradas`
+    + ` <span class="dim">— carona custa ~metade de um centro; a faixa`
+    + ` ${CATALOGO.teto_carona_mb}–${CATALOGO.piso_centro_mb||500} MB não foi medida</span>`;
+
+  // TODAS sao desenhadas. O que era caro nao era o numero de linhas e sim buscar
+  // 389 miniaturas pela ponte; agora elas carregam so' quando entram na tela.
+  $("loraGrade").innerHTML = vis.map(l=>{
+    const sel = LORAS_ESCOLHIDAS.has(l.id) ? " sel" : "";
+    const pc = {carona:"car", ambos:"amb", centro:"cen"}[l.papel] || "cen";
+    const cc = {sim:"ok", nao:"no", desconhecida:"dq"}[l.compat] || "dq";
+    const ct = {sim:"compatível", nao:"incompatível", desconhecida:"família ?"}[l.compat];
+    const semTag = (l.dominio||[]).length ? "" : `<i class="lr-warn" title="sem etiquetas">sem tags</i>`;
+    return `<div class="lr${sel}" data-id="${esc(l.id)}">`
+         + `<div class="lr-img" data-thumb="${esc(l.thumb||"")}"></div>`
+         + `<div class="lr-txt">`
+         +   `<div class="lr-nome">${esc(l.titulo||l.id)}</div>`
+         +   `<div class="lr-tags">`
+         +     `<span class="lr-tag ${pc}">${l.papel}</span>`
+         +     `<span class="lr-tag ${cc}">${ct}</span>`
+         +     semTag
+         +   `</div>`
+         +   `<div class="lr-mb">${l.mb} MB${l.posto?" · posto "+l.posto:""}`
+         +     `${(l.dominio||[]).length?" · "+esc(l.dominio.slice(0,4).join(", ")):""}</div>`
+         + `</div></div>`;
+  }).join("") || `<div class="mini dim">nada com esse filtro</div>`;
+  observaThumbs();
+  pintaEscolhidas();
+}
+
+/* Miniatura sob demanda: so' quando a linha entra na tela. Sem isto, mostrar as
+   389 dispararia 389 chamadas de ponte de uma vez e travaria a rolagem. */
+let OBS_THUMB = null;
+function observaThumbs(){
+  if(!OBS_THUMB){
+    OBS_THUMB = new IntersectionObserver(async (ents)=>{
+      for(const e of ents){
+        if(!e.isIntersecting) continue;
+        const el = e.target;
+        OBS_THUMB.unobserve(el);
+        if(el.dataset.pronto || !el.dataset.thumb){ el.classList.add("vazia"); continue; }
+        el.dataset.pronto = "1";
+        try{
+          const d = await api().gsmde_thumb(el.dataset.thumb);
+          if(d) el.style.backgroundImage = `url('${d}')`; else el.classList.add("vazia");
+        }catch(err){ el.classList.add("vazia"); }
+      }
+    }, {root: $("loraGrade"), rootMargin: "200px"});
+  }
+  document.querySelectorAll(".lr-img:not([data-pronto])").forEach(el=>OBS_THUMB.observe(el));
+}
+
+function pintaEscolhidas(){
+  const n = LORAS_ESCOLHIDAS.size;
+  if(!n){ $("loraEscolhidas").innerHTML = ""; return; }
+  const itens = Array.from(LORAS_ESCOLHIDAS.values());
+  const car = itens.filter(l=>l.papel==="carona").length;
+  $("loraEscolhidas").innerHTML =
+      `<b>${n} escolhida${n>1?"s":""}</b>: ${itens.map(l=>esc(l.titulo||l.id)).join(", ")}`
+    + `<div class="dim">${car} como carona (sem passada extra) · ${n-car} como centro`
+    + ` (+1 passada cada)</div>`;
+}
+
+/* Clique: insere as tags de dominio no prompt e marca a LoRA.
+   O roteador le o prompt DEPOIS, entao inserir a tag e' o que faz o centro
+   correspondente ser convocado — e a LoRA escolhida entra como carona por cima,
+   em vez de virar mais um centro. */
+function alternaLora(id){
+  if(!CATALOGO) return;
+  const l = (CATALOGO.loras||[]).find(x=>x.id===id);
+  if(!l) return;
+  const ta = $("pos");
+  const marca = (l.dominio||[]).slice(0,3).join(", ");
+  if(LORAS_ESCOLHIDAS.has(id)){
+    LORAS_ESCOLHIDAS.delete(id);
+    if(marca) ta.value = ta.value.replace(marca, "").replace(/,\s*,/g, ",")
+                                 .replace(/^\s*,\s*/, "").trim();
+  }else{
+    LORAS_ESCOLHIDAS.set(id, l);
+    if(marca && !ta.value.includes(marca))
+      ta.value = (ta.value.trim() ? ta.value.trim().replace(/,\s*$/,"") + ", " : "") + marca;
+  }
+  ta.dispatchEvent(new Event("input", {bubbles:true}));
+  pintaGaleria();
+  atualizaCusto();
+}
+
+/* Popup de dominio no hover: mostra as etiquetas REAIS do treino da LoRA,
+   lidas de ss_tag_frequency. Nao e' descricao editorial — e' o que o autor
+   mostrou ao modelo. */
+function montaGaleriaLoras(){
+  const grade = $("loraGrade");
+  if(!grade) return;
+  let pop = null;
+  grade.addEventListener("mouseover", (e)=>{
+    const c = e.target.closest(".lr"); if(!c) return;
+    const l = (CATALOGO?.loras||[]).find(x=>x.id===c.dataset.id); if(!l) return;
+    if(!pop){ pop = document.createElement("div"); pop.className = "lr-pop";
+              document.body.appendChild(pop); }
+    const dom = (l.dominio||[]);
+    const cc = {sim:"ok", nao:"no", desconhecida:"dq"}[l.compat] || "dq";
+    pop.innerHTML = `<b>${esc(l.titulo||l.id)}</b>`
+      + `<div class="dim">${l.mb} MB${l.posto?" · posto "+l.posto:""}`
+      + `${l.imagens?" · "+l.imagens+" imagens de treino":""}</div>`
+      + (dom.length ? `<div class="lr-dom">${dom.map(t=>`<i>${esc(t)}</i>`).join("")}</div>`
+                    : "")
+      + `<div class="lr-por"><b>papel:</b> ${esc(l.motivo_papel||l.papel)}</div>`
+      + `<div class="lr-por ${cc}"><b>compatibilidade:</b> ${esc(l.motivo_compat||"—")}</div>`
+      + (dom.length ? "" : `<div class="lr-por no"><b>roteamento:</b> ${esc(l.motivo_dominio||"")}</div>`);
+    const r = c.getBoundingClientRect();
+    pop.style.display = "block";
+    pop.style.left = Math.min(window.innerWidth-320, r.right+8) + "px";
+    pop.style.top  = Math.min(window.innerHeight-190, r.top) + "px";
+  });
+  grade.addEventListener("mouseout", (e)=>{
+    if(pop && !e.relatedTarget?.closest?.(".lr")) pop.style.display = "none";
+  });
+  grade.addEventListener("click", (e)=>{
+    const c = e.target.closest(".lr"); if(c) alternaLora(c.dataset.id);
+  });
+  $("loraBusca").addEventListener("input", pintaGaleria);
+  $("loraPapel").addEventListener("change", pintaGaleria);
+  $("loraCompat").addEventListener("change", pintaGaleria);
+  $("loraRecarrega").addEventListener("click", async ()=>{
+    const b = $("loraRecarrega");
+    b.disabled = true; b.textContent = "…";
+    $("loraResumo").textContent = "relendo a biblioteca do disco…";
+    try{
+      // regera o catalogo no Python: le os .safetensors de novo, entao pega
+      // LoRAs adicionadas depois que a UI abriu
+      const r = await api().gsmde_recatalogar();
+      if(r && r.__error__) throw new Error(r.__error__);
+      CATALOGO = null;
+      document.querySelectorAll(".lr-img").forEach(e=>delete e.dataset.pronto);
+      await carregaCatalogoLoras();
+    }catch(e){
+      $("loraResumo").innerHTML = `<b class="warn">${esc(e && e.message || e)}</b>`;
+    }finally{ b.disabled = false; b.textContent = "↻"; }
+  });
+  $("gLoras").addEventListener("toggle", ()=>{ if($("gLoras").open) carregaCatalogoLoras(); });
+  // o grupo pode ja' estar aberto (estado salvo da sessao anterior): sem isto o
+  // toggle nunca dispara e o catalogo nunca carrega
+  if($("gLoras").open) carregaCatalogoLoras();
+}
+
+/* ---------- backbone: qual UNet vai para a placa ----------------------------
+
+   Medido em 12/08 numa bancada de 54 geracoes a 1024 (docs/relatorio.md): a UNet
+   ORIGINAL e' a unica que transborda para a RAM. Reduzir nao e' so' economia — e' o
+   que tira a geracao da zona de despejo nesta placa de 8 GB.
+
+   O custo e' que nem todo modulo de LoRA encontra alvo; os que somem estao no nivel
+   profundo, e o efeito aparece em detalhe de material e objeto pequeno, nao em
+   pessoa. Por isso o numero fica escrito na propria opcao: a escolha e' do usuario e
+   ela tem um preco que ele precisa ver antes de escolher.                        */
+const FILA_TODAS = [];      // quando "Todas" esta escolhido, as variantes pendentes
+let varianteEmCurso = null; // a que esta rodando agora (rotula a barra de estado)
+
+function varianteAtual(){
+  const v = $("backboneVar") ? $("backboneVar").value : "original";
+  if(v !== "__todas__") return v;
+  // no modo "Todas" quem manda e' a fila; se ela secou, a rodada e' da primeira
+  return varianteEmCurso || todasAsVariantes()[0];
+}
+
+function todasAsVariantes(){
+  return Array.from($("backboneVar").options)
+              .map(o=>o.value).filter(v=>v !== "__todas__");
+}
+
+function syncBackboneVar(){
+  const s = $("backboneVar"), info = $("backboneVarInfo");
+  if(!s || !info) return;
+  if(s.value === "__todas__"){
+    const n = todasAsVariantes().length;
+    info.textContent = `${n} gerações, mesma seed e mesmo prompt em cada modelo — ` +
+                       `serve para comparar, não para produzir.`;
+  } else if(s.value === "original"){
+    info.textContent = "a única que transborda para a RAM a 1024 (0,30 GB medidos); " +
+                       "em compensação, todas as LoRAs encaixam.";
+  } else {
+    const t = s.options[s.selectedIndex].textContent;
+    const pct = (t.match(/(\d+)%/) || [])[1];
+    info.textContent = `sem transbordo. ${pct}% dos módulos de LoRA encaixam — ` +
+                       `o que falta pesa em material e objeto pequeno, não em pessoa.`;
+  }
+}
+
 /* ---------- monta a config e dispara ---------- */
 function buildCfg(){
   if($("seedRand").checked) $("seed").value = Math.floor(Math.random()*2147483647);
@@ -417,6 +690,7 @@ function buildCfg(){
     steps:+$("steps").value||26, seed:+$("seed").value||1234,
     width: baseW(), height: baseH(), size: baseW(),   // 'size' = fallback/metadados
     backbone_assert:+$("backbone").value,
+    variante: varianteAtual(),
     weighted:$("weighted").checked, center_focus:$("centerFocus").checked,
     focus_w:+$("focusW").value||1.15, context_w:+$("contextW").value||0.9,
     mask_every:+$("maskEvery").value||4, yield_ms:+$("yieldMs").value||40,
@@ -425,6 +699,11 @@ function buildCfg(){
     refinar:$("hires").checked, camadas:strCamadas(), upscaler:$("upscaler").value,
     detailers: DETS.map(d=>({model:d.model, prompt:d.prompt||"",
                              denoise:d.dn, steps:d.st})),
+    // Medido em 17/08: sem máscara com buracos o detailer redesenha o que não é
+    // alvo (o nariz entre os olhos); sem a regra do par, repintar um olho só
+    // deixa as duas íris de cores diferentes. Padrão ligado nos dois.
+    det_mascarado:$("detMascarado").checked, det_par:$("detPar").checked,
+    det_lado_min:+$("detLadoMin").value||256, det_crop:+$("detCrop").value||1024,
     ultra:$("ultra").checked, ultra_halo:$("ultra").checked,
     ultra_scale:+$("ultraScale").value, ultra_core:+$("ultraTile").value,
     ultra_pad:+$("ultraPad").value, ultra_overlap:+$("ultraOv").value,
@@ -451,6 +730,25 @@ async function gerar(){
     return;
   }
   pararLoop = false; rodada = 0;
+
+  // MODO "TODAS": mesma seed, mesmo prompt, um modelo por vez.
+  //
+  // Sequencial e nao paralelo por decisao, nao por preguica: duas cargas na mesma
+  // placa ja derrubaram o driver para o generico da Microsoft duas vezes neste
+  // projeto. E a seed e' fixada AQUI, antes da fila, senao "seed aleatoria" sortearia
+  // uma por rodada e o comparativo compararia seeds em vez de modelos.
+  FILA_TODAS.length = 0;
+  varianteEmCurso = null;
+  if($("backboneVar") && $("backboneVar").value === "__todas__"){
+    if($("seedRand").checked){
+      $("seed").value = Math.floor(Math.random()*2147483647);
+      $("seedRand").checked = false;   // visivel: o usuario ve por que parou de sortear
+      avisa("Modo Todas: seed fixada em " + $("seed").value +
+            " para que o comparativo compare modelos, não seeds.");
+    }
+    FILA_TODAS.push(...todasAsVariantes());
+    varianteEmCurso = FILA_TODAS.shift();
+  }
   await umaRodada();
 }
 
@@ -504,7 +802,18 @@ async function poll(infinita, seed){
     }).catch(()=>{});
     // le a caixa AGORA, nao no inicio da rodada: desmarcar "infinita" no meio de
     // uma geracao tem que encerrar o loop quando ela terminar.
-    if($("infinita").checked && !pararLoop){
+    // a fila do modo "Todas" vem ANTES da infinita: sao coisas diferentes, e quem
+    // pediu um comparativo quer o comparativo inteiro, nao um loop na primeira
+    if(FILA_TODAS.length && !pararLoop){
+      varianteEmCurso = FILA_TODAS.shift();
+      setBusy(true, `comparativo: ${varianteEmCurso} ` +
+                    `(faltam ${FILA_TODAS.length})`);
+      setTimeout(umaRodada, 400);
+    } else if(varianteEmCurso && !FILA_TODAS.length &&
+              $("backboneVar").value === "__todas__"){
+      varianteEmCurso = null;
+      setBusy(false, "comparativo completo");
+    } else if($("infinita").checked && !pararLoop){
       setBusy(true, `rodada ${rodada} pronta — indo p/ a próxima`);
       setTimeout(umaRodada, 400);
     } else {
@@ -526,8 +835,16 @@ async function verCentros(){
   if(!r || r.__error__){ $("routeOut").textContent = (r&&r.__error__) || "—"; return; }
   const lista = (r.centros||"").split(";").filter(Boolean).map(x=>x.split(":")[0]);
   window.__ultimaRota = lista.concat((r.globais||"").split(",").filter(Boolean));
+  // o numero de camadas vem JUNTO da lista de centros: e' o momento em que o
+  // usuario descobre quantos especialistas o prompt convocou, e portanto o momento
+  // certo para dizer quanto trabalho isso significa
+  const nc = window.__ultimaRota.length;
+  const ps = +$("steps").value || 26;
   $("routeOut").innerHTML = "<b>centros:</b> " + (lista.join(", ")||"(base pura)")
-    + (r.globais ? " · <b>globais:</b> "+esc(r.globais) : "");
+    + (r.globais ? " · <b>globais:</b> "+esc(r.globais) : "")
+    + (nc ? `<div class="mini" style="margin-top:4px">≡ <b>${nc} camadas</b> por passo`
+            + ` · ${ps} passos × ${nc+2} = <b>${ps*(nc+2)} passadas</b> do modelo`
+            + ` <span class="dim">(um modelo comum faria ${ps*2})</span></div>` : "");
   atualizaCusto();
   return r;
 }
@@ -584,6 +901,12 @@ async function reciclar(){
   DETS = (d.detailers||[]).map(x=>({model:x.model, prompt:x.prompt||"",
                                     dn:+x.denoise||0.3, st:+x.steps||20}));
   pintaDets();
+  // `!== undefined` e nao `||`: com `||`, desmarcar a caixa e salvar traria ela
+  // de volta marcada na proxima sessao, porque false cairia no padrao.
+  if(d.det_mascarado !== undefined) $("detMascarado").checked = !!d.det_mascarado;
+  if(d.det_par !== undefined) $("detPar").checked = !!d.det_par;
+  if(d.det_lado_min) set("detLadoMin", d.det_lado_min);
+  if(d.det_crop) set("detCrop", d.det_crop);
   if(d.ultra !== undefined){ $("ultra").checked = !!d.ultra; syncUltra(); }
   if(d.ultra_scale) set("ultraScale", d.ultra_scale);
   if(d.ultra_core) set("ultraTile", d.ultra_core);
@@ -746,6 +1069,7 @@ async function i2iGerar(){
     steps: +$("i2iSteps").value || 30, seed: +$("i2iSeed").value || 7,
     cfg: +$("cfg").value, escala: +$("escala").value, gw: +$("gw").value,
     backbone_assert: +$("backbone").value,
+    variante: varianteAtual(),
     paginacao: $("paginacao").value, vram_reserva: +$("vramReserva").value || 0,
     offload_base: $("offloadBase").value, offload_teto: +$("offloadTeto").value || 0,
     weighted: $("weighted").checked, manter: true,
@@ -877,6 +1201,8 @@ async function boot(){
   $("auto").addEventListener("change", syncAuto); syncAuto();
   $("hires").addEventListener("change", syncHires); syncHires();
   $("ultra").addEventListener("change", syncUltra); syncUltra();
+  $("backboneVar").addEventListener("change", syncBackboneVar); syncBackboneVar();
+  montaGaleriaLoras();
   montaCor();
   montaI2i();
   montaAbas();
@@ -884,6 +1210,7 @@ async function boot(){
   montaCivitai();
   montaAgenda();
   montaModelos();
+  montaScanAdapt();
   montaCaminhos();
   montaRam();
   montaTE();
@@ -1000,6 +1327,8 @@ async function boot(){
   $("left").addEventListener("input", scheduleSave);
   $("left").addEventListener("change", scheduleSave);
   $("left").addEventListener("change", atualizaCusto);   // marcar centro muda a RAM
+  // a conta de camadas depende dos passos; 'change' so' dispara ao sair do campo
+  $("steps").addEventListener("input", atualizaCusto);
   atualizaCusto();
   $("groups").addEventListener("toggle", scheduleSave, true);
   window.addEventListener("beforeunload", ()=>{
@@ -1102,6 +1431,15 @@ async function montaTE(){
     try{ await a.gsmde_te_config($("teOffload").value, $("teDtype").value); }catch(_){}
     avisa("Modo do text encoder salvo — vale na próxima geração.");
   };
+  if($("aotriton")){
+    (async ()=>{ try{ const r = await a.gsmde_aotriton();
+      if(r && r.ok) $("aotriton").checked = r.aotriton !== "0"; }catch(_){} })();
+    $("aotriton").addEventListener("change", async ()=>{
+      await a.gsmde_aotriton($("aotriton").checked);
+      avisa("AOTRITON " + ($("aotriton").checked ? "ligado" : "desligado") +
+            " — vale na próxima geração.");
+    });
+  }
   $("teOffload").addEventListener("change", salva);
   $("teDtype").addEventListener("change", salva);
 }
@@ -1323,6 +1661,59 @@ function montaCaminhos(){
         if(inp) inp.value = b.dataset.p;
         avisa("Raiz preenchida — clique em salvar para valer.");
       }));
+  });
+}
+
+
+/* ---------------- scan & adapt ----------------
+   O GSMDE nao publica "modelos GSMDE": ele adota LoRAs SDXL de qualquer origem.
+   O que falta em um LoRA baixado nao e' compatibilidade de peso — e' saber QUE
+   DOMINIO ele cobre, senao o roteador nunca o escolhe. Isto le esse dominio do
+   proprio arquivo (ss_tag_frequency do kohya) e mostra antes de instalar. */
+let SA_ULTIMO = null;
+
+function montaScanAdapt(){
+  if(!$("saScan")) return;
+  $("saPick").addEventListener("click", async ()=>{
+    const a = api(); if(!a) return;
+    const r = await a.caminhos_escolher("lora", "arquivo");
+    if(r && r.ok) $("saCaminho").value = r.caminho;
+  });
+
+  $("saScan").addEventListener("click", async ()=>{
+    const a = api(); if(!a) return;
+    const p = $("saCaminho").value.trim();
+    if(!p){ avisa("Informe o caminho do .safetensors."); return; }
+    $("saSaida").textContent = "lendo metadados…";
+    $("saInstalar").style.display = "none";
+    const r = await a.centros_adaptar(p);
+    if(!r || !r.ok){ $("saSaida").textContent = "erro: " + ((r && r.erro) || "?"); return; }
+    SA_ULTIMO = r;
+    const linhas = [
+      `<b>${esc(r.titulo || r.arquivo)}</b> · ${r.gb} GB` +
+        (r.rank ? ` · rank ${r.rank}` : "") +
+        (r.n_imagens_treino ? ` · ${r.n_imagens_treino} imgs de treino` : ""),
+      `fonte do domínio: <b>${r.fonte_dominio}</b>` +
+        (r.base_treino ? ` · treinado sobre <i>${esc(r.base_treino)}</i>` : "")
+    ];
+    if(r.adaptavel){
+      linhas.push("domínio detectado (o que o roteador vai usar):");
+      linhas.push("<div style='opacity:.8'>" + r.dominio.slice(0,8).map(d=>
+        `· <b>${esc(d.tag)}</b> <span style="opacity:.6">(peso ${d.peso})</span>`).join("<br>") + "</div>");
+      $("saInstalar").style.display = "";
+    } else {
+      linhas.push(`⚠️ ${r.motivo}`);
+    }
+    $("saSaida").innerHTML = linhas.join("<br>");
+  });
+
+  $("saInstalar").addEventListener("click", async ()=>{
+    const a = api(); if(!a || !SA_ULTIMO) return;
+    $("saSaida").innerHTML += "<br>instalando…";
+    const r = await a.centros_instalar($("saCaminho").value.trim(), "local");
+    $("saSaida").innerHTML += r && r.ok
+      ? `<br>✅ instalado — o cluster agora tem <b>${r.n}</b> centro(s)`
+      : `<br>erro: ${(r && r.erro) || "?"}`;
   });
 }
 
