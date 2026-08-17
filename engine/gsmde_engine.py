@@ -505,16 +505,67 @@ class XAttnProbe:
             h.remove()
 
 
+MANIFESTO = Path(r"D:\Models\gsmde\backbones.json")
+
+
+def backbones_disponiveis():
+    """Lista do manifesto, filtrada pelo que existe MESMO no disco.
+
+    O manifesto e' a fonte unica para a UI e para o motor. Se a UI listasse por conta
+    propria e o motor resolvesse por conta propria, os dois divergiriam em silencio no
+    dia em que um checkpoint fosse apagado — e o sintoma seria 'escolhi d3u10 e saiu
+    outra coisa', que ninguem liga a um select desatualizado.
+    """
+    import json
+    try:
+        d = json.loads(MANIFESTO.read_text(encoding="utf-8"))
+    except Exception:
+        return [{"id": "original", "rotulo": "Original", "recomendada": True}]
+    fora = [b for b in d.get("backbones", [])
+            if b["id"] != "original" and not Path(b["arquivo"] or "").exists()]
+    for b in fora:
+        print(f"[gsmde] backbone '{b['id']}' esta no manifesto mas nao no disco",
+              flush=True)
+    return [b for b in d.get("backbones", []) if b not in fora]
+
+
 class GSMDE:
+    def _troca_unet(self, pipe, variante):
+        """Substitui a UNet da pipeline pela do checkpoint da variante."""
+        from diffusers import UNet2DConditionModel
+        from gera_student import _reajusta_por_forma
+        alvo = next((b for b in backbones_disponiveis() if b["id"] == variante), None)
+        if not alvo or not alvo.get("arquivo"):
+            print(f"[gsmde] variante '{variante}' indisponivel; seguindo na original",
+                  flush=True)
+            self.variante = "original"
+            return
+        ck = torch.load(alvo["arquivo"], map_location="cpu", weights_only=False)
+        u = UNet2DConditionModel.from_config(ck.get("cfg") or ck.get("config"))
+        # A config do diffusers nao representa toda cirurgia: o corte de FFN encolhe
+        # matrizes que a config declara em tamanho original. Redimensionar pela forma
+        # do proprio state_dict cobre isso e qualquer cirurgia futura de largura.
+        _reajusta_por_forma(u, ck["state_dict"])
+        u.load_state_dict(ck["state_dict"], strict=True)
+        # a troca acontece com TUDO na CPU; quem sobe para a placa e' o fluxo normal
+        pipe.unet = u.to(torch.float16)
+        self.variante_info = {k: alvo.get(k) for k in
+                              ("id", "gb_fp16", "params_B", "lora_pct")}
+        print(f"[gsmde] backbone {variante}: {alvo.get('gb_fp16')} GB, "
+              f"{alvo.get('lora_pct')}% dos modulos de LoRA encaixam", flush=True)
+        del ck
+
     def __init__(self, centers, globals_=(), adapter_scale=0.8, cfg=5.5,
                  yield_ms=40, base=BASE, spec_root=SPEC, device=None,
                  page_adapters=True, vae_offload=True, vae_tile=512,
-                 vram_reserva=0.0):
+                 vram_reserva=0.0, variante="original"):
         from diffusers import StableDiffusionXLPipeline, EulerAncestralDiscreteScheduler
         from safetensors.torch import load_file
         self.dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.regional = centers                     # [(nome,[palavras])]
         self.globs = list(globals_)
+        # adaptadores que viajam DENTRO da passada de outro; ver guided()
+        self.caronas = []
         self.adapter_scale, self.cfg, self.yield_ms = adapter_scale, cfg, yield_ms
         self.vae_offload = vae_offload
         self.fatias = {}
@@ -534,6 +585,25 @@ class GSMDE:
         with fase("load: base do disco"):
             pipe = StableDiffusionXLPipeline.from_single_file(base, torch_dtype=torch.float16)
             pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
+
+        # ------------------------------------------------- backbone reduzido
+        #
+        # Troca a UNet por uma variante de corte assimetrico. Medido em 12/08 numa
+        # bancada de 54 geracoes a 1024 (ver D:/GSMDE/docs/relatorio.md):
+        #
+        #   a ORIGINAL e' a unica que transborda para a RAM (0,30 GB contra 0,08 de
+        #   todas as reduzidas). Com 4,78 GB de UNet mais ativacao a 1024, a placa de
+        #   8 GB nao fecha a conta. Encolher nao e' so' economia — e' o que tira a
+        #   geracao da zona de despejo.
+        #
+        # O CUSTO e' que nem todo modulo de LoRA encontra alvo: os que somem estao em
+        # down_blocks.2, e o efeito aparece em detalhe de material e objeto pequeno,
+        # nao em pessoa. Por isso a escolha fica com o usuario, com o numero a vista.
+        self.variante = variante or "original"
+        self.variante_info = {}
+        if self.variante != "original":
+            with fase(f"load: backbone {self.variante}"):
+                self._troca_unet(pipe, self.variante)
         # O UNet SO' SOBE DEPOIS DOS CENTROS.
         #
         # Antes ele ia para a placa aqui, e o load_lora_weights la' embaixo
@@ -670,7 +740,35 @@ class GSMDE:
         # erro aqui volta ao comportamento historico (paginar tudo).
         if _subir_unet_depois:
             with fase("load: unet -> gpu (apos os centros)"):
-                pipe.unet.to(self.dev)
+                # `.to()` percorre a arvore de submodulos, e os nichos JA ESTAO
+                # pendurados na UNet — subiriam junto com ela. Era o furo na
+                # estrategia descrita nas linhas ~611-622: carregar com a UNet na
+                # CPU faz os adapters nascerem na RAM, mas este `.to()` os levava
+                # de volta. Medido em 16/08, 1024 com 6 centros e 2 caronas: pico
+                # de 8,59 GB na carga (4,78 da base + 3,81 dos nichos) numa placa
+                # de 8,00 -> 2,98 GB de despejo ANTES do primeiro passo. O laco em
+                # si estava limpo (0,10 GB), e paginar os nichos nao adiantava:
+                # a politica so' roda depois, tarde demais.
+                #
+                # Desanexa os nichos, sobe so' a base, reanexa. Estado final e' o
+                # mesmo de antes (nichos na RAM, a politica decide quem sobe) —
+                # muda apenas que a placa nunca ve os dois somados.
+                guardados = []
+                for mod in pipe.unet.modules():
+                    for attr in ("lora_A", "lora_B"):
+                        sub = mod._modules.get(attr)
+                        if isinstance(sub, torch.nn.Module):
+                            guardados.append((mod, attr, sub))
+                            mod._modules[attr] = torch.nn.ModuleDict()
+                try:
+                    pipe.unet.to(self.dev)
+                finally:
+                    # `finally`: se o .to() falhar no meio, a UNet nao pode ficar
+                    # sem os adapters — seria um motor mudo, sem erro visivel.
+                    for mod, attr, sub in guardados:
+                        mod._modules[attr] = sub
+                print(f"[gsmde] base -> placa sem os {len(guardados)} modulos de "
+                      f"nicho (eles ficam na RAM ate' a politica decidir)", flush=True)
         # ANTES da politica: ela move nichos, e precisa mover blocos, nao modulos.
         try:
             self._monta_blocos()
@@ -708,6 +806,36 @@ class GSMDE:
         """Ativa a mascara de regiao na self-attn de todos os attn1 (mask=None limpa)."""
         for w in self.selfattn:
             w.region = mask
+
+    def globais_como_carona(self, peso=None):
+        """Move os globais de passada propria para carona, e devolve quantos moveu.
+
+        POR QUE ISTO E' CORRETO, E NAO UM ATALHO
+            Um global e' definido por NAO TER TERRITORIO: ele e' misturado na tela
+            inteira, sem mascara. A passada propria existe para permitir mascarar a
+            predicao por regiao — beneficio que o global, por definicao, nao usa.
+            Ele pagava o custo de um centro sem consumir o que esse custo compra.
+
+        O QUE MUDA NA MATEMATICA
+            Antes:  comb = comb*(1-w) + w * eps_global      (mistura de PREDICOES)
+            Depois: a correcao de baixo posto do global entra nos PESOS junto com a
+            do centro, e a predicao ja' sai influenciada pelos dois.
+
+            Nao e' a mesma operacao. Misturar predicoes e' linear na saida; compor
+            adaptadores e' linear nos pesos e nao-linear na saida. O resultado visual
+            muda, e por isso isto e' OPCAO e nao troca silenciosa — o peso pede
+            calibracao propria.
+        """
+        if not self.globs:
+            return 0
+        w = self.adapter_scale if peso is None else peso
+        movidos = [(n, w) for n in self.globs]
+        self.caronas = (self.caronas or []) + movidos
+        self.globs = []
+        print(f"[gsmde] {len(movidos)} global(is) viraram carona a peso {w}: "
+              f"{[n for n, _ in movidos]} — {len(movidos)} passada(s) por passo a menos",
+              flush=True)
+        return len(movidos)
 
     def _perf_add(self, chave, dt):
         """Acumulador de tempo por componente. time.time() puro, SEM synchronize:
@@ -832,13 +960,27 @@ class GSMDE:
         # o pico ficou perto de 5,5 GB com o backbone residente; escalando pela
         # area da uma estimativa grosseira mas util, porque o erro que importa
         # (passar de 8 GB) e' grande, nao sutil.
-        PICO_REF_GB, AREA_REF = 5.5, 768 * 768
-        pico = PICO_REF_GB * max(1.0, area / AREA_REF)
+        # A referencia foi medida com o BACKBONE RESIDENTE. Com o accelerate
+        # transmitindo o UNet por blocos ele deixa de ocupar os ~4,8 GB e a previsao
+        # antiga vira alarme falso — 1024 com offload sequential foi medido rodando
+        # a 25,1 s/passo, sem despejo. Desconta o backbone quando ele nao mora la'.
+        PICO_REF_GB, AREA_REF, BACKBONE_GB = 5.5, 768 * 768, 4.8
+        com_offload = getattr(self, "offload_base", "none") not in (None, "", "none")
+        base_ref = PICO_REF_GB - (BACKBONE_GB if com_offload else 0.0)
+        pico = base_ref * max(1.0, area / AREA_REF)
         if pico > total * 0.95:
             print(f"[gsmde] AVISO: {w}x{h} deve pedir ~{pico:.1f} GB de pico e a "
                   f"placa tem {total:.1f} GB. Nesta build do ROCm faltar VRAM nao "
                   f"da OOM limpo — da 'unspecified launch failure' e trava a placa. "
                   f"Considere gerar menor e subir no hires.", flush=True)
+
+        # Com o accelerate no comando, a residencia dos nichos ja' foi decidida por
+        # `aplica_offload_base`, que desligou a paginacao DE PROPOSITO (ver o
+        # comentario dos "dois gerentes" logo acima dele). Re-rodar a politica aqui
+        # religa o segundo gerente toda vez que a area muda — inclusive entre as
+        # camadas do hires. A area nova ja' ficou registrada; e' so' nao repaginar.
+        if com_offload:
+            return
         try:
             self.page_adapters = self._politica_vram(
                 "auto", getattr(self, "_vram_reserva", 0.0))
@@ -1714,7 +1856,10 @@ class GSMDE:
                                   **cn).sample
                 yield_gpu(self.yield_ms)
                 u, c = o.chunk(2)
-                lat = pipe.scheduler.step(u + self.cfg * (c - u), t, lat).prev_sample
+                # generator=gen: mesmo motivo do caminho com centros (ver abaixo) —
+                # sem ele o ruido ancestral vem do RNG global e a seed nao fecha.
+                lat = pipe.scheduler.step(u + self.cfg * (c - u), t, lat,
+                                          generator=gen).prev_sample
                 if cb:
                     cb(si + 1, len(ts), Hpx)
                 self._maybe_preview(lat, si + 1, len(ts), preview_every)
@@ -1744,9 +1889,29 @@ class GSMDE:
                 if self.page_adapters:
                     _t = time.time()
                     self._page(nome, self.dev)      # sobe so o nicho ativo
+                    # a carona esta ativa em TODA passada: se for paginada para fora
+                    # a cada troca de centro, o custo dela deixa de ser zero
+                    for _c, _ in (getattr(self, "caronas", None) or []):
+                        self._page(_c, self.dev)
                     self._perf_add("paginar->VRAM", time.time() - _t)
+                # CARONAS: adaptadores SEM territorio viajam DENTRO desta passada.
+                #
+                # Um centro custa uma passada completa do UNet porque a predicao dele
+                # precisa ser mascarada por regiao. Quem nao tem regiao — estilo,
+                # camera, grade de cor, realce de detalhe — nao usa esse beneficio e
+                # nao deveria pagar esse preco: o peft compoe varias correcoes de
+                # baixo posto na MESMA multiplicacao, e a carona sai de graca.
+                #
+                # Medido em 13/08: as passadas sao ~98% do custo. Converter um global
+                # de passada propria para carona remove uma passada inteira por passo.
                 _t = time.time()
-                pipe.unet.set_adapters([nome], [self.adapter_scale])
+                car = getattr(self, "caronas", None) or []
+                if car:
+                    pipe.unet.set_adapters(
+                        [nome] + [c for c, _ in car],
+                        [self.adapter_scale] + [w for _, w in car])
+                else:
+                    pipe.unet.set_adapters([nome], [self.adapter_scale])
                 self._perf_add("set_adapters", time.time() - _t)
                 if batch_cfg:
                     _t = time.time()
@@ -1769,7 +1934,8 @@ class GSMDE:
                                       added_cond_kwargs=self._cond(pp, add_time)).sample
                     yield_gpu(self.yield_ms)
                 if self.page_adapters:
-                    self._despeja_por_pressao(nome)  # so devolve se apertou
+                    if nome not in [c for c, _ in (getattr(self, "caronas", None) or [])]:
+                        self._despeja_por_pressao(nome)  # so devolve se apertou
                 self._set_regiao_selfattn(None)     # limpa p/ o proximo
                 return u + self.cfg * (c - u)
 
@@ -1865,7 +2031,14 @@ class GSMDE:
                     g = guided(n)
                     comb = g if comb is None else comb * (1 - global_weight) + global_weight * g
             with fase("scheduler: step"):
-                lat = pipe.scheduler.step(comb, t, lat).prev_sample
+                # generator=gen e' OBRIGATORIO aqui. O EulerAncestral injeta ruido
+                # NOVO a cada passo; sem o generator ele puxa do RNG global, e a
+                # seed passa a governar so' o latente inicial. Efeito medido em
+                # 16/08: duas corridas com a MESMA seed e config deram nitidez
+                # 346,2 e 201,5 — a imagem nao era reproduzivel, e comparacao A/B
+                # entre condicoes carregava ruido de corrida do tamanho do efeito
+                # que se queria medir.
+                lat = pipe.scheduler.step(comb, t, lat, generator=gen).prev_sample
             if cb:
                 cb(si + 1, len(ts), Hpx)      # p/ a barra de progresso da UI
             self._maybe_preview(lat, si + 1, len(ts), preview_every)
