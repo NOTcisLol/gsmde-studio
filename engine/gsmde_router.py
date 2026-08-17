@@ -222,8 +222,20 @@ def externos(groups=None):
 
 
 def rotear(prompt, disp=None, max_centros=4, voc=None):
-    """prompt -> centros + as palavras do PROPRIO prompt que os ancoram."""
+    """prompt -> centros + as palavras do PROPRIO prompt que os ancoram.
+
+    max_centros=0 significa BACKBONE PURO: nem regionais nem globais. Sai antes
+    de qualquer casamento — nao adianta zerar so' os regionais, porque os globais
+    nao passam pelo teto (eles sao separados no laco la' embaixo) e voltariam a
+    entrar como centros, cada um com a sua passada de UNet. Este e' o modo em que
+    a geracao custa 1 passada por passo e os especialistas so' aparecem depois,
+    no detailer.
+    """
     disp = disp if disp is not None else disponiveis()
+    if int(max_centros) <= 0:
+        return {"centros": "", "regional": [], "globais": [], "cortados": [],
+                "diag": ["teto 0: backbone puro, sem regionais nem globais"],
+                "nao_roteado": []}
     voc = voc if voc is not None else vocabulario(disp)
     p = _norm(prompt)
     palavras = [w for w in re.split(r"[\s,]+", p) if w]

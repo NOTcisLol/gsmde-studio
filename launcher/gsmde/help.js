@@ -12,9 +12,10 @@ window.HELP = {
 
   auto:{ t:"Roteamento automatico", b:"Le o prompt e escolhe os especialistas sozinho — voce nao precisa saber os nomes dos centros. Desligue so para escolher na mao.",
     img:"Cada especialista pinta a regiao dele.", hw:"So texto/CPU; nao afeta a GPU." },
-  maxCentros:{ t:"Maximo de centros", b:"Teto de especialistas ativos ao mesmo tempo, ordenados pela forca do casamento com o prompt.",
-    img:"Mais centros = mais conceitos atendidos.", hw:"Cada centro ~0,7GB paginado por passo (RAM↔VRAM). Mais centros = mais lento e mais RAM.",
-    hint:"6 e um bom equilibrio em 8GB." },
+  maxCentros:{ t:"Maximo de centros", b:"Teto de especialistas ativos ao mesmo tempo, ordenados pela forca do casamento com o prompt. ZERO = so o backbone: nenhum regional e nenhum global, uma passada de UNet por passo em vez de uma por centro.",
+    img:"Mais centros = mais conceitos atendidos. Com zero, a cena sai do backbone puro — combine com o detailer para os especialistas entrarem so onde importa.",
+    hw:"Cada centro ~0,7GB paginado por passo (RAM↔VRAM). Medido a 1024: 6 centros no laco custam 26,5 s/passo contra 3,2 s/passo so com o backbone.",
+    hint:"6 equilibra em 8GB; 0 + detailer foi 3,3x mais rapido na bancada." },
   verCentros:{ t:"Ver o que ele escolhe", b:"Mostra quais especialistas o roteador ativaria para o prompt atual, antes de gerar.",
     img:"—", hw:"Instantaneo (so texto)." },
 

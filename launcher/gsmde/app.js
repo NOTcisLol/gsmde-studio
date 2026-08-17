@@ -177,6 +177,16 @@ function strCamadas(){
     ? CAMADAS.filter(c=>c.on).map(c=>`${pxDaCamada(c)}:${c.dn}:${c.st}`).join(",") : "";
 }
 
+/* Teto de centros. `+valor || 6` transformaria 0 em 6 — zero e' falsy em JS, e o
+   usuario que pedisse "so o backbone" receberia seis centros calado. Vazio ou
+   invalido cai no padrao; 0 e' um valor legitimo e significa BACKBONE PURO. */
+function nCentros(){
+  const v = String(($("maxCentros")||{}).value ?? "").trim();
+  if(v === "") return 6;
+  const n = Number(v);
+  return (Number.isFinite(n) && n >= 0) ? Math.floor(n) : 6;
+}
+
 /* ================= detailer: um prompt POR ALVO ================= */
 
 /* Mesma tabela do motor (refine_gsmde.CENTRO_AUTO). Duplicada aqui SO' para o
@@ -727,7 +737,7 @@ function buildCfg(){
   const man = montaCentros();
   const infinita = $("infinita").checked;
   return {
-    auto: $("auto").checked, max_centros: +$("maxCentros").value || 6,
+    auto: $("auto").checked, max_centros: nCentros(),
     prompt: $("pos").value, negative: $("neg").value,
     centros: man.centros, globais: man.globais,
     escala:+$("escala").value, gw:+$("gw").value, cfg:+$("cfg").value,
@@ -876,7 +886,7 @@ async function parar(){
 
 async function verCentros(){
   if(!api()) return;
-  const r = await api().gsmde_route($("pos").value, +$("maxCentros").value||6);
+  const r = await api().gsmde_route($("pos").value, nCentros());
   if(!r || r.__error__){ $("routeOut").textContent = (r&&r.__error__) || "—"; return; }
   const lista = (r.centros||"").split(";").filter(Boolean).map(x=>x.split(":")[0]);
   window.__ultimaRota = lista.concat((r.globais||"").split(",").filter(Boolean));
@@ -925,7 +935,7 @@ async function reciclar(){
   }
   set("escala", d.escala); set("gw", d.gw);
   if(d.backbone_assert !== undefined && d.backbone_assert !== null) set("backbone", d.backbone_assert);
-  if(d.max_centros) set("maxCentros", d.max_centros);
+  if(d.max_centros !== undefined) set("maxCentros", d.max_centros);
   if(d.focus_w) set("focusW", d.focus_w);
   if(d.context_w) set("contextW", d.context_w);
   if(d.upscaler) $("upscaler").value = chaveUpscaler(d.upscaler);
@@ -1110,7 +1120,7 @@ async function i2iGerar(){
   const r = await api().gsmde_start({
     modo: "inpaint",
     prompt: $("i2iPos").value, negative: $("neg").value,
-    auto: true, max_centros: +$("maxCentros").value || 6,
+    auto: true, max_centros: nCentros(),
     init_image: base, mask_image: i2iMascaraPB(),
     halo: +$("i2iHalo").value || 128, blend: +$("i2iBlend").value || 48,
     ctx_global: +$("i2iCtxGlobal").value || 0,
@@ -1506,7 +1516,7 @@ async function monitorVivo(st){
   MON_T = agora;
   try{
     const r = await api().ram_estado($("ramBuf") ? $("ramBuf").value : null,
-                                     +$("maxCentros").value || 6);
+                                     nCentros());
     if(!r || !r.ok) return;
     const pct = Math.round(r.uso * 100);
     const cor = r.critico ? "#ff7b72" : (pct >= 80 ? "#ffa657" : "#7ee787");
