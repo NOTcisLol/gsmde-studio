@@ -74,6 +74,32 @@
       </div>
     </details>
 
+    <details class="group" id="gLoras" data-help="galeriaLoras">
+      <summary>📚 LoRAs da biblioteca <span class="chev">›</span></summary>
+      <div class="body">
+        <div class="row" style="gap:6px">
+          <input id="loraBusca" type="text" placeholder="filtrar por nome ou domínio…"
+                 style="flex:1">
+          <select id="loraPapel" style="width:112px" title="papel: carona viaja na passada de outro; centro tem passada própria">
+            <option value="todos">papel: todos</option>
+            <option value="carona">carona</option>
+            <option value="ambos">ambos</option>
+            <option value="centro">centro</option>
+          </select>
+          <select id="loraCompat" style="width:118px" title="compatibilidade com o backbone SDXL">
+            <option value="todos">compat: todas</option>
+            <option value="sim">compatível</option>
+            <option value="desconhecida">família ?</option>
+            <option value="nao">incompatível</option>
+          </select>
+          <button id="loraRecarrega" class="mini-btn" title="relê a biblioteca do disco e reconstrói o catálogo">↻</button>
+        </div>
+        <div class="mini" id="loraResumo" style="margin:6px 0">carregando…</div>
+        <div id="loraGrade"></div>
+        <div class="mini dim" id="loraEscolhidas"></div>
+      </div>
+    </details>
+
     <!-- so aparece com o automatico DESLIGADO -->
     <details class="group" id="gCentros" data-help="centrosManual">
       <summary>🎛️ Centros (manual) <span class="chev">›</span></summary>
@@ -103,6 +129,22 @@
           <div class="lbl">Backbone dominante <span class="val" id="backbone_v">0.60</span></div>
           <div class="slider"><input type="range" id="backbone" min="0" max="1" step="0.05" value="0.6"></div>
         </div>
+        <div class="field" data-help="backboneVar">
+          <div class="lbl">Modelo base</div>
+          <select id="backboneVar">
+            <option value="original">Original — 4,78 GB · 100% das LoRAs</option>
+            <option value="d6u10">d6u10 — 4,00 GB · 83%</option>
+            <option value="d5u10" selected>d5u10 — 3,81 GB · 79% (recomendada)</option>
+            <option value="d4u10">d4u10 — 3,62 GB · 74%</option>
+            <option value="d3u10">d3u10 — 3,42 GB · 70%</option>
+            <option value="d2u10">d2u10 — 3,23 GB · 66%</option>
+            <option value="d1u10">d1u10 — 3,03 GB · 61% (a menor)</option>
+            <option value="d8u8">d8u8 — 4,00 GB · 83% (corte simétrico)</option>
+            <option value="d10u6">d10u6 — 4,00 GB · 83% (corta a subida)</option>
+            <option value="__todas__">▦ Todas — gera a mesma seed em cada uma</option>
+          </select>
+        </div>
+        <div class="mini" id="backboneVarInfo"></div>
         <div class="row">
           <div class="field" data-help="size"><div class="lbl">Largura</div>
             <input id="largura" type="number" step="8" min="256" value="768"></div>
@@ -152,6 +194,20 @@
           (vazio = usa o positivo da cena).</div>
         <div id="detList"></div>
         <select id="detAdd"><option value="">+ adicionar alvo…</option></select>
+        <div class="row" style="margin-top:8px">
+          <label class="chk" data-help="detMascarado">
+            <input type="checkbox" id="detMascarado" checked> Máscara com buracos</label>
+          <label class="chk" data-help="detPar">
+            <input type="checkbox" id="detPar" checked> Exigir par (olhos)</label>
+        </div>
+        <div class="row">
+          <div class="field" data-help="detLadoMin"><div class="lbl">Recorte mínimo (px)</div>
+            <input id="detLadoMin" type="number" step="32" value="256"></div>
+          <div class="field" data-help="detCrop"><div class="lbl">Gerar em (px)</div>
+            <input id="detCrop" type="number" step="64" value="1024"></div>
+        </div>
+        <div class="mini">Alvos vizinhos do mesmo detector entram numa <b>passada
+          só</b>: é o que impede um olho sair de cor diferente do outro.</div>
       </div>
     </details>
 
@@ -227,11 +283,11 @@
           <input id="vramReserva" type="number" step="0.5" min="0" value="0"></div>
         <div class="field" data-help="offloadBase"><div class="lbl">Offload do UNet base (modos do SD.Next)</div>
           <select id="offloadBase">
-            <option value="none">Nenhum — UNet inteiro na placa (padrão)</option>
+            <option value="sequential" selected>Sequential — submódulo por submódulo (padrão, 6× medido)</option>
+            <option value="model">Model — UNet inteiro sobe/desce por chamada (2,8×)</option>
+            <option value="group">Group — blocos com prefetch por stream (2,4×)</option>
+            <option value="none">Nenhum — UNet inteiro na placa (o mais lento aqui)</option>
             <option value="balanced">Balanced — parte o UNet sob um teto</option>
-            <option value="sequential">Sequential — submódulo por submódulo (esvazia mais)</option>
-            <option value="model">Model — UNet inteiro sobe/desce por chamada</option>
-            <option value="group">Group — blocos com prefetch por stream</option>
           </select></div>
         <div class="field" data-help="offloadBase"><div class="lbl">Teto do balanced (GB, 0 = 60% da placa)</div>
           <input id="offloadTeto" type="number" step="0.5" min="0" value="0"></div>
@@ -321,6 +377,22 @@
       <div id="mdResultados" class="mini"></div>
 
 
+
+      <details class="group" open data-help="scanAdapt">
+        <summary>🔬 Scan &amp; adapt <span class="chev">›</span></summary>
+        <div class="body">
+          <div class="mini">Não existe modelo "GSMDE" para baixar — mas <b>qualquer LoRA
+            SDXL já é um centro em potencial</b>. Isto lê o arquivo e descobre quais tags
+            ele conhece, que é o que o roteador precisa saber.</div>
+          <div style="display:flex;gap:4px;margin-top:8px">
+            <input id="saCaminho" type="text" placeholder="caminho do .safetensors" style="flex:1">
+            <button id="saPick" class="mini-btn">…</button>
+          </div>
+          <button id="saScan" class="mini-btn">🔬 analisar</button>
+          <button id="saInstalar" class="mini-btn" style="display:none">➕ instalar como centro</button>
+          <div id="saSaida" class="mini" style="margin-top:8px"></div>
+        </div>
+      </details>
 
       <details class="group" style="margin-top:8px">
         <summary>🔧 UNet como backbone ou centro <span class="chev">›</span></summary>
@@ -510,7 +582,13 @@
 
       <details class="group" data-help="yield">
         <summary>⚙️ Execução <span class="chev">›</span></summary>
-        <div class="body"><div id="slotExec"></div></div>
+        <div class="body"><div id="slotExec"></div>          <label class="chk" data-help="aotriton"><input type="checkbox" id="aotriton" checked>
+            flash-attn experimental do ROCm (AOTRITON)</label>
+          <div class="mini" style="opacity:.7">Dá ~12x na geração, mas é
+            <b>experimental</b> e é suspeito de travar a placa com
+            <code>unspecified launch failure</code> dentro da atenção.
+            Desligue para testar se os travamentos param.</div>
+</div>
       </details>
 
 

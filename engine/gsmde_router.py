@@ -26,10 +26,10 @@ import json
 import re
 from pathlib import Path
 
-CFG = Path(r"D:\Trainer_v13\config")
+CFG = Path(r"D:\GSMDE\trainer\config")
 # Migrado p/ a biblioteca em 2026-07-26; o caminho antigo fica como reserva.
 SPEC = next((p for p in (Path(r"D:\Models\gsmde\specialists"),
-                         Path(r"D:\Trainer_v13\models\specialists")) if p.exists()),
+                         Path(r"D:\GSMDE\ckpts\models\specialists")) if p.exists()),
             Path(r"D:\Models\gsmde\specialists"))
 
 # Macros sem territorio: aplicam na tela toda, sem mascara (11.3).
@@ -173,7 +173,7 @@ def vocabulario(disponiveis, groups=None, macros=CFG / "macro_groups_enriched.js
     return voc
 
 
-FICHAS_EXTERNAS = [Path(r"D:\Trainer_v13") / f"specialists_{o}"
+FICHAS_EXTERNAS = [Path(r"D:\GSMDE\trainer") / f"specialists_{o}"
                    for o in ("local", "hf", "civitai")]
 
 

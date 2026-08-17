@@ -505,16 +505,67 @@ class XAttnProbe:
             h.remove()
 
 
+MANIFESTO = Path(r"D:\Models\gsmde\backbones.json")
+
+
+def backbones_disponiveis():
+    """Lista do manifesto, filtrada pelo que existe MESMO no disco.
+
+    O manifesto e' a fonte unica para a UI e para o motor. Se a UI listasse por conta
+    propria e o motor resolvesse por conta propria, os dois divergiriam em silencio no
+    dia em que um checkpoint fosse apagado — e o sintoma seria 'escolhi d3u10 e saiu
+    outra coisa', que ninguem liga a um select desatualizado.
+    """
+    import json
+    try:
+        d = json.loads(MANIFESTO.read_text(encoding="utf-8"))
+    except Exception:
+        return [{"id": "original", "rotulo": "Original", "recomendada": True}]
+    fora = [b for b in d.get("backbones", [])
+            if b["id"] != "original" and not Path(b["arquivo"] or "").exists()]
+    for b in fora:
+        print(f"[gsmde] backbone '{b['id']}' esta no manifesto mas nao no disco",
+              flush=True)
+    return [b for b in d.get("backbones", []) if b not in fora]
+
+
 class GSMDE:
+    def _troca_unet(self, pipe, variante):
+        """Substitui a UNet da pipeline pela do checkpoint da variante."""
+        from diffusers import UNet2DConditionModel
+        from gera_student import _reajusta_por_forma
+        alvo = next((b for b in backbones_disponiveis() if b["id"] == variante), None)
+        if not alvo or not alvo.get("arquivo"):
+            print(f"[gsmde] variante '{variante}' indisponivel; seguindo na original",
+                  flush=True)
+            self.variante = "original"
+            return
+        ck = torch.load(alvo["arquivo"], map_location="cpu", weights_only=False)
+        u = UNet2DConditionModel.from_config(ck.get("cfg") or ck.get("config"))
+        # A config do diffusers nao representa toda cirurgia: o corte de FFN encolhe
+        # matrizes que a config declara em tamanho original. Redimensionar pela forma
+        # do proprio state_dict cobre isso e qualquer cirurgia futura de largura.
+        _reajusta_por_forma(u, ck["state_dict"])
+        u.load_state_dict(ck["state_dict"], strict=True)
+        # a troca acontece com TUDO na CPU; quem sobe para a placa e' o fluxo normal
+        pipe.unet = u.to(torch.float16)
+        self.variante_info = {k: alvo.get(k) for k in
+                              ("id", "gb_fp16", "params_B", "lora_pct")}
+        print(f"[gsmde] backbone {variante}: {alvo.get('gb_fp16')} GB, "
+              f"{alvo.get('lora_pct')}% dos modulos de LoRA encaixam", flush=True)
+        del ck
+
     def __init__(self, centers, globals_=(), adapter_scale=0.8, cfg=5.5,
                  yield_ms=40, base=BASE, spec_root=SPEC, device=None,
                  page_adapters=True, vae_offload=True, vae_tile=512,
-                 vram_reserva=0.0):
+                 vram_reserva=0.0, variante="original"):
         from diffusers import StableDiffusionXLPipeline, EulerAncestralDiscreteScheduler
         from safetensors.torch import load_file
         self.dev = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.regional = centers                     # [(nome,[palavras])]
         self.globs = list(globals_)
+        # adaptadores que viajam DENTRO da passada de outro; ver guided()
+        self.caronas = []
         self.adapter_scale, self.cfg, self.yield_ms = adapter_scale, cfg, yield_ms
         self.vae_offload = vae_offload
         self.fatias = {}
@@ -534,8 +585,42 @@ class GSMDE:
         with fase("load: base do disco"):
             pipe = StableDiffusionXLPipeline.from_single_file(base, torch_dtype=torch.float16)
             pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
-        with fase("load: unet -> gpu"):
-            pipe.unet.to(self.dev)
+
+        # ------------------------------------------------- backbone reduzido
+        #
+        # Troca a UNet por uma variante de corte assimetrico. Medido em 12/08 numa
+        # bancada de 54 geracoes a 1024 (ver D:/GSMDE/docs/relatorio.md):
+        #
+        #   a ORIGINAL e' a unica que transborda para a RAM (0,30 GB contra 0,08 de
+        #   todas as reduzidas). Com 4,78 GB de UNet mais ativacao a 1024, a placa de
+        #   8 GB nao fecha a conta. Encolher nao e' so' economia — e' o que tira a
+        #   geracao da zona de despejo.
+        #
+        # O CUSTO e' que nem todo modulo de LoRA encontra alvo: os que somem estao em
+        # down_blocks.2, e o efeito aparece em detalhe de material e objeto pequeno,
+        # nao em pessoa. Por isso a escolha fica com o usuario, com o numero a vista.
+        self.variante = variante or "original"
+        self.variante_info = {}
+        if self.variante != "original":
+            with fase(f"load: backbone {self.variante}"):
+                self._troca_unet(pipe, self.variante)
+        # O UNet SO' SOBE DEPOIS DOS CENTROS.
+        #
+        # Antes ele ia para a placa aqui, e o load_lora_weights la' embaixo
+        # anexava cada adapter a um UNet que JA estava na GPU — ou seja, todo
+        # centro nascia na VRAM. Medido: 5,14 GB de UNet + 6 centros de ~0,5 GB
+        # = pico de 7,73 de 8,00 GB, com derrame de 0,2 -> 9,2 GB na
+        # compartilhada, ANTES de a geracao comecar.
+        #
+        # A politica de paginacao ate' corrigia depois (devolvia tudo p/ a RAM,
+        # media, trazia so' o que cabia), mas tarde: o derrame ja tinha
+        # acontecido. E o sintoma final era `unspecified launch failure`, que
+        # neste build do ROCm e' como a falta de VRAM se manifesta — parecia bug
+        # de kernel e mandou a investigacao para o AOTRITON e para a paginacao.
+        #
+        # Carregando com o UNet na CPU, os adapters nascem na RAM (que e' onde
+        # a paginacao quer que eles fiquem) e a placa nunca ve os dois juntos.
+        _subir_unet_depois = True
         with fase("load: vae + te -> cpu"):
             # enable_tiling() sozinho e' DECORATIVO: o limiar padrao e'
             # tile_sample_min_size=1024, entao a 768 o VAE nao tila nada e faz o
@@ -653,7 +738,46 @@ class GSMDE:
         # A politica esta no caminho critico de TODO carregamento: se ela falhar, o
         # motor inteiro nao sobe. Otimizacao nao pode derrubar o basico — qualquer
         # erro aqui volta ao comportamento historico (paginar tudo).
+        if _subir_unet_depois:
+            with fase("load: unet -> gpu (apos os centros)"):
+                # `.to()` percorre a arvore de submodulos, e os nichos JA ESTAO
+                # pendurados na UNet — subiriam junto com ela. Era o furo na
+                # estrategia descrita nas linhas ~611-622: carregar com a UNet na
+                # CPU faz os adapters nascerem na RAM, mas este `.to()` os levava
+                # de volta. Medido em 16/08, 1024 com 6 centros e 2 caronas: pico
+                # de 8,59 GB na carga (4,78 da base + 3,81 dos nichos) numa placa
+                # de 8,00 -> 2,98 GB de despejo ANTES do primeiro passo. O laco em
+                # si estava limpo (0,10 GB), e paginar os nichos nao adiantava:
+                # a politica so' roda depois, tarde demais.
+                #
+                # Desanexa os nichos, sobe so' a base, reanexa. Estado final e' o
+                # mesmo de antes (nichos na RAM, a politica decide quem sobe) —
+                # muda apenas que a placa nunca ve os dois somados.
+                guardados = []
+                for mod in pipe.unet.modules():
+                    for attr in ("lora_A", "lora_B"):
+                        sub = mod._modules.get(attr)
+                        if isinstance(sub, torch.nn.Module):
+                            guardados.append((mod, attr, sub))
+                            mod._modules[attr] = torch.nn.ModuleDict()
+                try:
+                    pipe.unet.to(self.dev)
+                finally:
+                    # `finally`: se o .to() falhar no meio, a UNet nao pode ficar
+                    # sem os adapters — seria um motor mudo, sem erro visivel.
+                    for mod, attr, sub in guardados:
+                        mod._modules[attr] = sub
+                print(f"[gsmde] base -> placa sem os {len(guardados)} modulos de "
+                      f"nicho (eles ficam na RAM ate' a politica decidir)", flush=True)
+        # ANTES da politica: ela move nichos, e precisa mover blocos, nao modulos.
         try:
+            self._monta_blocos()
+        except Exception as e:
+            print(f"[gsmde] blocos contiguos indisponiveis ({e}); "
+                  f"paginando modulo a modulo", flush=True)
+            self.blocos = {}
+        try:
+            self._vram_reserva = vram_reserva
             self.page_adapters = self._politica_vram(page_adapters, vram_reserva)
         except Exception as e:
             print(f"[gsmde] politica de paginacao falhou ({e}); paginando tudo",
@@ -682,6 +806,36 @@ class GSMDE:
         """Ativa a mascara de regiao na self-attn de todos os attn1 (mask=None limpa)."""
         for w in self.selfattn:
             w.region = mask
+
+    def globais_como_carona(self, peso=None):
+        """Move os globais de passada propria para carona, e devolve quantos moveu.
+
+        POR QUE ISTO E' CORRETO, E NAO UM ATALHO
+            Um global e' definido por NAO TER TERRITORIO: ele e' misturado na tela
+            inteira, sem mascara. A passada propria existe para permitir mascarar a
+            predicao por regiao — beneficio que o global, por definicao, nao usa.
+            Ele pagava o custo de um centro sem consumir o que esse custo compra.
+
+        O QUE MUDA NA MATEMATICA
+            Antes:  comb = comb*(1-w) + w * eps_global      (mistura de PREDICOES)
+            Depois: a correcao de baixo posto do global entra nos PESOS junto com a
+            do centro, e a predicao ja' sai influenciada pelos dois.
+
+            Nao e' a mesma operacao. Misturar predicoes e' linear na saida; compor
+            adaptadores e' linear nos pesos e nao-linear na saida. O resultado visual
+            muda, e por isso isto e' OPCAO e nao troca silenciosa — o peso pede
+            calibracao propria.
+        """
+        if not self.globs:
+            return 0
+        w = self.adapter_scale if peso is None else peso
+        movidos = [(n, w) for n in self.globs]
+        self.caronas = (self.caronas or []) + movidos
+        self.globs = []
+        print(f"[gsmde] {len(movidos)} global(is) viraram carona a peso {w}: "
+              f"{[n for n, _ in movidos]} — {len(movidos)} passada(s) por passo a menos",
+              flush=True)
+        return len(movidos)
 
     def _perf_add(self, chave, dt):
         """Acumulador de tempo por componente. time.time() puro, SEM synchronize:
@@ -780,6 +934,60 @@ class GSMDE:
                 pass
         return torch.device("cpu"), dt or torch.float16
 
+    def _revisa_residencia(self, w, h):
+        """Reavalia quem fica na placa AGORA, com a resolucao real em maos.
+
+        A politica original rodava so' no __init__, quando o tamanho da imagem
+        ainda nao existe — e reservava um valor fixo. So' que as ativacoes
+        crescem com a AREA, e o hires muda a area no meio do caminho: uma
+        residencia aprovada a 1280x720 pode nao valer a 1920x1080.
+
+        Aqui a area vira parte da decisao, e a revisao acontece a cada mudanca
+        de tamanho (inclusive entre as camadas do hires).
+        """
+        area = int(w) * int(h)
+        if getattr(self, "_area_alvo", None) == area:
+            return                                  # nada mudou
+        self._area_alvo = area
+        if not getattr(self, "paged", None):
+            return
+        try:
+            total = torch.cuda.mem_get_info()[1] / 2**30
+        except Exception:
+            return
+
+        # PREVISAO: cabe? A referencia sai do medido nesta maquina — a 768x768
+        # o pico ficou perto de 5,5 GB com o backbone residente; escalando pela
+        # area da uma estimativa grosseira mas util, porque o erro que importa
+        # (passar de 8 GB) e' grande, nao sutil.
+        # A referencia foi medida com o BACKBONE RESIDENTE. Com o accelerate
+        # transmitindo o UNet por blocos ele deixa de ocupar os ~4,8 GB e a previsao
+        # antiga vira alarme falso — 1024 com offload sequential foi medido rodando
+        # a 25,1 s/passo, sem despejo. Desconta o backbone quando ele nao mora la'.
+        PICO_REF_GB, AREA_REF, BACKBONE_GB = 5.5, 768 * 768, 4.8
+        com_offload = getattr(self, "offload_base", "none") not in (None, "", "none")
+        base_ref = PICO_REF_GB - (BACKBONE_GB if com_offload else 0.0)
+        pico = base_ref * max(1.0, area / AREA_REF)
+        if pico > total * 0.95:
+            print(f"[gsmde] AVISO: {w}x{h} deve pedir ~{pico:.1f} GB de pico e a "
+                  f"placa tem {total:.1f} GB. Nesta build do ROCm faltar VRAM nao "
+                  f"da OOM limpo — da 'unspecified launch failure' e trava a placa. "
+                  f"Considere gerar menor e subir no hires.", flush=True)
+
+        # Com o accelerate no comando, a residencia dos nichos ja' foi decidida por
+        # `aplica_offload_base`, que desligou a paginacao DE PROPOSITO (ver o
+        # comentario dos "dois gerentes" logo acima dele). Re-rodar a politica aqui
+        # religa o segundo gerente toda vez que a area muda — inclusive entre as
+        # camadas do hires. A area nova ja' ficou registrada; e' so' nao repaginar.
+        if com_offload:
+            return
+        try:
+            self.page_adapters = self._politica_vram(
+                "auto", getattr(self, "_vram_reserva", 0.0))
+        except Exception as e:
+            print(f"[gsmde] revisao de residencia falhou ({e}); mantendo a anterior",
+                  flush=True)
+
     def _politica_vram(self, modo=True, reserva_gb=0.0):
         """Quais nichos ficam RESIDENTES na placa. Devolve se ainda ha paginacao.
 
@@ -801,15 +1009,17 @@ class GSMDE:
         if modo in (False, "vram", "residente"):
             self.residentes = set(self.paged)
             for nome in self.paged:               # garante que estao MESMO na placa
-                for m in self.paged[nome]:
-                    m.to(self.dev, non_blocking=True)
+                if not self._bloco_para(nome, self.dev):
+                    for m in self.paged[nome]:
+                        m.to(self.dev, non_blocking=True)
             self.teto_alocado = float("inf")      # nunca despeja
             print("[gsmde] paginacao OFF: todos os nichos residentes (pedido)", flush=True)
             return False
         if modo in (True, "ram", "paginado"):
             for nome in self.paged:
-                for m in self.paged[nome]:
-                    m.to("cpu", non_blocking=True)
+                if not self._bloco_para(nome, "cpu"):
+                    for m in self.paged[nome]:
+                        m.to("cpu", non_blocking=True)
             torch.cuda.empty_cache()
             self.teto_alocado = 0.0               # sempre despeja
             print("[gsmde] paginacao RAM: todos os nichos paginados (pedido)", flush=True)
@@ -820,7 +1030,49 @@ class GSMDE:
             livre, total = livre / 2**30, total / 2**30
         except Exception:
             return True                       # sem sensor, o seguro e' paginar
-        reserva = float(reserva_gb or 0) or max(2.5, 0.30 * total)
+        # RESERVA PROPORCIONAL A AREA.
+        #
+        # Era constante (2,5 GB), calibrada a 768x768. As ativacoes crescem com a
+        # AREA da imagem, entao a 1280x720 (1,56x a area) a premissa ficava curta
+        # e a politica aprovava uma configuracao que nao cabia. Medido: a
+        # dedicada batia 7,73 de 8,00 GB, o WDDM comecava a empurrar para a
+        # compartilhada (0,2 -> 9,3 GB em 24s) e o driver despejava em massa.
+        #
+        # E o modo de falha nao ajudava a diagnosticar: neste build do ROCm
+        # esgotar a VRAM NAO da `hipErrorOutOfMemory`, da `unspecified launch
+        # failure` — o mesmo sintoma de um kernel quebrado. Isso mandou a
+        # investigacao para o AOTRITON e para a paginacao antes de chegar aqui.
+        # A BASE ERA UM CHUTE DE PIOR CASO, E COMIA O ORCAMENTO INTEIRO.
+        #
+        # `max(2.5, 0.30*total)` da 2,5 GB numa placa de 8. So que as ativacoes
+        # foram MEDIDAS (2026-07-28): ~0,49 GB a 589.824 px, com o pico real da
+        # geracao subindo pouco alem disso. Reservar 2,5 para gastar 0,5 jogava
+        # fora 2 GB de folga.
+        #
+        # O efeito era invisivel ate o backbone encolher: com o teacher nao sobrava
+        # nada mesmo, entao a constante nunca era o gargalo. Com o backbone podado
+        # havia 2,51 GB livres e a politica ainda decidiu "0 de 10 nichos
+        # residentes" — porque 2,51 - 2,50 = 0,01. Nao faltava memoria; faltava a
+        # politica enxergar a memoria que existia.
+        #
+        # Agora a base sai da MEDIDA com margem de seguranca, nao do medo. O piso
+        # existe para o caso de a medicao nao valer (build diferente, resolucao
+        # muito pequena): abaixo dele nao se economiza nada util mesmo.
+        AREA_REF = 768 * 768
+        ATIV_REF_GB = 0.49                    # medido nesta maquina, a AREA_REF
+        MARGEM = 1.6                          # 60% sobre o medido
+        PISO_GB = 0.8
+        area = getattr(self, "_area_alvo", AREA_REF) or AREA_REF
+        escala = max(1.0, area / AREA_REF)
+        if reserva_gb:                        # pedido explicito ganha da medida
+            reserva = float(reserva_gb) * escala
+        else:
+            reserva = max(PISO_GB, ATIV_REF_GB * MARGEM * escala)
+        # TETO DE OCUPACAO (escolha do usuario: 95%). No Windows o WDDM derrama em
+        # vez de travar, entao a folga pode ser menor que num Linux — mas alguma
+        # folga tem de sobrar, senao cada pouso de centro despeja algo.
+        teto = 0.95 * total
+        reserva = max(reserva, total - teto)
 
         def _bytes(o):
             # self.paged guarda os MODULOS lora_A/lora_B (nn.Linear), nao tensores:
@@ -839,8 +1091,9 @@ class GSMDE:
         # ai pergunta quanto sobra de verdade. Ai o numero ja desconta os outros
         # processos e nao esta contaminado por spill nosso.
         for nome in self.paged:
-            for m in self.paged[nome]:
-                m.to("cpu", non_blocking=True)
+            if not self._bloco_para(nome, "cpu"):
+                for m in self.paged[nome]:
+                    m.to("cpu", non_blocking=True)
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
         livre = torch.cuda.mem_get_info()[0] / 2**30
@@ -850,8 +1103,9 @@ class GSMDE:
                 self.residentes.add(nome)
                 orcamento -= tam[nome]
         for nome in self.residentes:              # traz de volta so quem coube
-            for m in self.paged[nome]:
-                m.to(self.dev, non_blocking=True)
+            if not self._bloco_para(nome, self.dev):
+                for m in self.paged[nome]:
+                    m.to(self.dev, non_blocking=True)
         # TETO da NOSSA alocacao, p/ o despejo por pressao decidir durante o laco.
         # Medido agora, uma vez: 'livre' aqui ja desconta os outros processos (o
         # desktop custa ~1,56GB nesta maquina). Dentro do laco nao da p/ reconsultar
@@ -860,7 +1114,8 @@ class GSMDE:
         self.teto_alocado = (torch.cuda.memory_allocated() / 2**30) + livre - reserva
         fica = sum(tam[n] for n in self.residentes)
         print(f"[gsmde] paginacao AUTO: placa {total:.1f}GB, livre (apos limpar) "
-              f"{livre:.2f}GB, reserva {reserva:.1f}GB p/ ativacoes -> "
+              f"{livre:.2f}GB, reserva {reserva:.1f}GB p/ ativacoes "
+              f"(area {int(getattr(self, '_area_alvo', 768*768))}px) -> "
               f"{len(self.residentes)}/{len(self.paged)} nichos residentes "
               f"({fica:.2f}GB), {len(self.paged) - len(self.residentes)} paginados",
               flush=True)
@@ -966,12 +1221,92 @@ class GSMDE:
             self.page_adapters = True
         return self.page_adapters
 
+    def _monta_blocos(self):
+        """Um BUFFER CONTIGUO por centro, em vez de um .to() por modulo.
+
+        O PORQUE, medido: com 7 centros o motor reportava "7840 modulos", e a
+        paginacao fazia um .to() em CADA um, a cada passo — ~196 mil
+        transferencias minusculas numa geracao de 25 passos. Nao e' so' lento:
+        essa enxurrada de alocacoes pequenas fragmenta o heap do driver, e sob
+        WDDM o commit escorre para a memoria COMPARTILHADA (medido: 9,5 GB de
+        shared com apenas 4,87 GB alocados pelo torch). Dai vinham os tres
+        sintomas juntos — 86% do tempo preso em yield_gpu esperando a fila, o
+        spill, e por fim `hipErrorLaunchFailure` travando a placa.
+
+        Aqui os pesos de um centro viram UM tensor plano. Paginar passa a ser
+        uma copia so' por centro (7 em vez de 7840), e os parametros viram
+        VIEWS dentro do bloco — o forward continua lendo os mesmos tensores,
+        sem copia extra.
+        """
+        self.blocos = {}
+        for nome, mods in self.paged.items():
+            params = [q for m in mods for q in m.parameters(recurse=False)]
+            if not params:
+                continue
+            dts = {q.dtype for q in params}
+            if len(dts) != 1:
+                # dtypes misturados nao cabem num bloco unico; esse centro fica
+                # no caminho antigo em vez de quebrar.
+                print(f"[gsmde] centro '{nome}': dtypes {dts} — sem bloco contiguo",
+                      flush=True)
+                continue
+            total = sum(q.numel() for q in params)
+            # SEM pin_memory. Medido nesta maquina: alocar 4,24 GB pinados
+            # levou a memoria COMPARTILHADA da GPU de 0,82 para 8,83 GB — o
+            # Windows conta memoria page-locked como shared GPU memory, e nao
+            # devolve nem depois do free. Era a causa do spill saltar de ~2 GB
+            # para ~11 GB depois que os blocos contiguos entraram.
+            #
+            # Pinar so' serve p/ o non_blocking=True ser assincrono de verdade.
+            # Aqui a copia e' UMA por centro por passo (nao 1120), entao o ganho
+            # da assincronia e' pequeno e nao paga 8 GB de shared.
+            flat = torch.empty(total, dtype=params[0].dtype, device="cpu")
+            meta, off = [], 0
+            for q in params:
+                n = q.numel()
+                flat[off:off + n].copy_(q.data.detach().reshape(-1))
+                meta.append((q, off, n, tuple(q.shape)))
+                off += n
+            for q, o, n, shp in meta:       # aponta p/ o bloco na RAM
+                q.data = flat[o:o + n].view(shp)
+            self.blocos[nome] = {"cpu": flat, "meta": meta, "gpu": None}
+        if self.blocos:
+            n_mod = sum(len(v["meta"]) for v in self.blocos.values())
+            gb = sum(v["cpu"].numel() * v["cpu"].element_size()
+                     for v in self.blocos.values()) / 2**30
+            print(f"[gsmde] blocos contiguos: {len(self.blocos)} centros, "
+                  f"{gb:.2f} GB | 1 transferencia por centro em vez de {n_mod}",
+                  flush=True)
+
+    def _bloco_para(self, nome, dev):
+        """Move o bloco inteiro e reaponta as views. True se tratou aqui."""
+        b = getattr(self, "blocos", {}).get(nome)
+        if b is None:
+            return False
+        if dev == "cpu":
+            if b["gpu"] is not None:
+                for q, o, n, shp in b["meta"]:
+                    q.data = b["cpu"][o:o + n].view(shp)
+                b["gpu"] = None               # libera a copia da placa
+        else:
+            if b["gpu"] is None:
+                # Aloca a cada subida DE PROPOSITO: guardar o buffer da placa
+                # manteria os 7 centros residentes (~3,5 GB) e anularia a
+                # paginacao. O alocador do torch ja recicla blocos do mesmo
+                # tamanho, entao nao ha churn real no driver.
+                g = b["cpu"].to(dev, non_blocking=True)
+                b["gpu"] = g
+                for q, o, n, shp in b["meta"]:
+                    q.data = g[o:o + n].view(shp)
+        return True
+
     def _page(self, nome, dev, forcar=False):
         if not forcar and nome in getattr(self, "residentes", ()):
             return                            # mora na placa: nao paga PCIe
         with fase(f"paginar nicho -> {'VRAM' if dev != 'cpu' else 'RAM'}"):
-            for m in self.paged.get(nome, []):
-                m.to(dev, non_blocking=True)
+            if not self._bloco_para(nome, dev):     # bloco contiguo quando ha
+                for m in self.paged.get(nome, []):  # senao, caminho antigo
+                    m.to(dev, non_blocking=True)
         if dev != "cpu":                      # LRU: usado agora = o mais recente
             ordem = getattr(self, "ordem_uso", None)
             if ordem is not None:
@@ -1454,6 +1789,7 @@ class GSMDE:
             Wpx, Hpx = init.size
         else:
             Hpx, Wpx = size_hw or (size, size)
+        self._revisa_residencia(Wpx, Hpx)
         H, W = Hpx // 8, Wpx // 8
         add_time = torch.tensor([[Hpx, Wpx, 0, 0, Hpx, Wpx]], device=dev, dtype=torch.float16)
         gen = torch.Generator(dev).manual_seed(seed)
@@ -1520,7 +1856,10 @@ class GSMDE:
                                   **cn).sample
                 yield_gpu(self.yield_ms)
                 u, c = o.chunk(2)
-                lat = pipe.scheduler.step(u + self.cfg * (c - u), t, lat).prev_sample
+                # generator=gen: mesmo motivo do caminho com centros (ver abaixo) —
+                # sem ele o ruido ancestral vem do RNG global e a seed nao fecha.
+                lat = pipe.scheduler.step(u + self.cfg * (c - u), t, lat,
+                                          generator=gen).prev_sample
                 if cb:
                     cb(si + 1, len(ts), Hpx)
                 self._maybe_preview(lat, si + 1, len(ts), preview_every)
@@ -1550,9 +1889,29 @@ class GSMDE:
                 if self.page_adapters:
                     _t = time.time()
                     self._page(nome, self.dev)      # sobe so o nicho ativo
+                    # a carona esta ativa em TODA passada: se for paginada para fora
+                    # a cada troca de centro, o custo dela deixa de ser zero
+                    for _c, _ in (getattr(self, "caronas", None) or []):
+                        self._page(_c, self.dev)
                     self._perf_add("paginar->VRAM", time.time() - _t)
+                # CARONAS: adaptadores SEM territorio viajam DENTRO desta passada.
+                #
+                # Um centro custa uma passada completa do UNet porque a predicao dele
+                # precisa ser mascarada por regiao. Quem nao tem regiao — estilo,
+                # camera, grade de cor, realce de detalhe — nao usa esse beneficio e
+                # nao deveria pagar esse preco: o peft compoe varias correcoes de
+                # baixo posto na MESMA multiplicacao, e a carona sai de graca.
+                #
+                # Medido em 13/08: as passadas sao ~98% do custo. Converter um global
+                # de passada propria para carona remove uma passada inteira por passo.
                 _t = time.time()
-                pipe.unet.set_adapters([nome], [self.adapter_scale])
+                car = getattr(self, "caronas", None) or []
+                if car:
+                    pipe.unet.set_adapters(
+                        [nome] + [c for c, _ in car],
+                        [self.adapter_scale] + [w for _, w in car])
+                else:
+                    pipe.unet.set_adapters([nome], [self.adapter_scale])
                 self._perf_add("set_adapters", time.time() - _t)
                 if batch_cfg:
                     _t = time.time()
@@ -1575,7 +1934,8 @@ class GSMDE:
                                       added_cond_kwargs=self._cond(pp, add_time)).sample
                     yield_gpu(self.yield_ms)
                 if self.page_adapters:
-                    self._despeja_por_pressao(nome)  # so devolve se apertou
+                    if nome not in [c for c, _ in (getattr(self, "caronas", None) or [])]:
+                        self._despeja_por_pressao(nome)  # so devolve se apertou
                 self._set_regiao_selfattn(None)     # limpa p/ o proximo
                 return u + self.cfg * (c - u)
 
@@ -1671,7 +2031,14 @@ class GSMDE:
                     g = guided(n)
                     comb = g if comb is None else comb * (1 - global_weight) + global_weight * g
             with fase("scheduler: step"):
-                lat = pipe.scheduler.step(comb, t, lat).prev_sample
+                # generator=gen e' OBRIGATORIO aqui. O EulerAncestral injeta ruido
+                # NOVO a cada passo; sem o generator ele puxa do RNG global, e a
+                # seed passa a governar so' o latente inicial. Efeito medido em
+                # 16/08: duas corridas com a MESMA seed e config deram nitidez
+                # 346,2 e 201,5 — a imagem nao era reproduzivel, e comparacao A/B
+                # entre condicoes carregava ruido de corrida do tamanho do efeito
+                # que se queria medir.
+                lat = pipe.scheduler.step(comb, t, lat, generator=gen).prev_sample
             if cb:
                 cb(si + 1, len(ts), Hpx)      # p/ a barra de progresso da UI
             self._maybe_preview(lat, si + 1, len(ts), preview_every)

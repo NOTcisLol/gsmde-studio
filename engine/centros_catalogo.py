@@ -37,7 +37,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(r"D:\Trainer_v13")
+ROOT = Path(r"D:\GSMDE\trainer")
 CFG = ROOT / "config"
 USO = ROOT / "config" / "centros_uso.json"
 
